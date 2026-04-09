@@ -21,7 +21,7 @@ def login_handler(state, meta, inputText, predictedIntent):
     nextMeta = meta
     #predictedIntent should be none for the first call, and then it will be updated based on the user's input and the flow's logic
     if state == "start":
-        nextResponse = "Hello! I'm Yvonne from CPCE SPEED and I'm here to assist you in learning SEHS4678! You can chat with me, have quizzes or get encouragements! \n Please enter your username to get started."
+        nextResponse = "Hello! I'm Snackie from CPCE SPEED and I'm here to assist you in learning SEHS4678! You can chat with me, have quizzes or get encouragements! \n Please enter your username to get started."
         nextState = "awaiting_username"
     if state == "awaiting_username":
         nextResponse = "Please enter your password."
