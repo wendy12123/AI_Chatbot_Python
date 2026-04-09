@@ -169,3 +169,7 @@ Because plugins auto-load from the package, new modules are discovered at startu
 - Remove sensitive debug prints from login.
 - Add unit tests for plugin transitions and quiz answer evaluation.
 - Add schema checks for quiz and user YAML files.
+
+
+add:
+ragknowledge: is made by google gemini on lecture notes

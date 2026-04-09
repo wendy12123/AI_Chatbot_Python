@@ -5,7 +5,7 @@ from typing import Any
 import runtimeFlowPlugins
 import yaml
 from runtimeSubmodules.chatbotNLP import predict_class
-import torch
+import torch as _torch
 
 
 BASEPATH = Path(__file__).resolve().parent.parent
@@ -15,7 +15,7 @@ CHAT_ACTIVE_STATE = "chatting"
 CHAT_HOLD_STATE = "hold_before_menu"
 _WORD_RE = re.compile(r"[A-Za-z0-9_]+")
 _LLM_CHECKPOINT = "HuggingFaceTB/SmolLM2-1.7B"
-_LLM_DEVICE = "cpu" if not torch.cuda.is_available() else "cuda"
+_LLM_DEVICE = "cpu" if not _torch.cuda.is_available() else "cuda"
 _LLM_MAX_INPUT_TOKENS = 1200
 _LLM_MAX_NEW_TOKENS = 180
 
@@ -28,9 +28,15 @@ _DEFAULT_CHAT_SETTINGS = {
 _LLM_CACHE = {
     "tokenizer": None,
     "model": None,
-    "torch": None,
     "load_attempted": False,
     "load_error": None,
+}
+
+_PREFLIGHT_STATUS = {
+    "rag_docs": 0,
+    "rag_sources": 0,
+    "llm_ready": False,
+    "llm_error": None,
 }
 
 
@@ -178,17 +184,28 @@ def _load_local_llm() -> tuple[Any | None, Any | None, str | None]:
     _LLM_CACHE["load_attempted"] = True
 
     try:
-        import torch as _torch
         from transformers import AutoModelForCausalLM as _AutoModelForCausalLM
         from transformers import AutoTokenizer as _AutoTokenizer
 
-        _LLM_CACHE["torch"] = _torch
         _LLM_CACHE["tokenizer"] = _AutoTokenizer.from_pretrained(_LLM_CHECKPOINT)
         _LLM_CACHE["model"] = _AutoModelForCausalLM.from_pretrained(_LLM_CHECKPOINT)
         return _LLM_CACHE["tokenizer"], _LLM_CACHE["model"], None
     except (ImportError, OSError, RuntimeError, ValueError, TypeError) as exc:
         _LLM_CACHE["load_error"] = str(exc)
         return None, None, _LLM_CACHE["load_error"]
+
+
+def _run_startup_preflight() -> None:
+    # RAG files are already read during module import when _build_index() runs.
+    _PREFLIGHT_STATUS["rag_docs"] = len(_RAG_DOCS)
+    _PREFLIGHT_STATUS["rag_sources"] = len({doc["source"] for doc in _RAG_DOCS})
+
+    tokenizer, model, load_error = _load_local_llm()
+    _PREFLIGHT_STATUS["llm_ready"] = tokenizer is not None and model is not None
+    _PREFLIGHT_STATUS["llm_error"] = load_error
+
+
+_run_startup_preflight()
 
 
 def _score_query(query_tokens: list[str], doc: dict, idf: dict[str, float]) -> float:
@@ -277,25 +294,28 @@ def _clean_llm_answer(decoded_text: str, prompt: str) -> str:
 
 def _synthesize_with_local_llm(query: str, hits: list[dict]) -> str | None:
     tokenizer, model, _err = _load_local_llm()
-    if tokenizer is None or model is None or _LLM_CACHE["torch"] is None:
+    if tokenizer is None or model is None:
         return None
+
+    tokenizer_obj: Any = tokenizer
+    model_obj: Any = model
 
     prompt = _build_synthesis_prompt(query, hits)
     try:
-        model_inputs = tokenizer(
+        model_inputs = tokenizer_obj(
             prompt,
             return_tensors="pt",
             truncation=True,
             max_length=_LLM_MAX_INPUT_TOKENS,
         )
         model_inputs = model_inputs.to(_LLM_DEVICE)
-        output_ids = model.generate(
+        output_ids = model_obj.generate(
             **model_inputs,
             max_new_tokens=_LLM_MAX_NEW_TOKENS,
             do_sample=False,
-            pad_token_id=tokenizer.eos_token_id,
+            pad_token_id=tokenizer_obj.eos_token_id,
         )
-        decoded = tokenizer.decode(output_ids[0], skip_special_tokens=True)
+        decoded = tokenizer_obj.decode(output_ids[0], skip_special_tokens=True)
         decoded = _clean_llm_answer(decoded, prompt)
 
         if not decoded:
