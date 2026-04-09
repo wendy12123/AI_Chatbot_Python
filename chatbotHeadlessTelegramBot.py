@@ -42,6 +42,7 @@ _BASE_DIR = Path(__file__).resolve().parent
 _ENV_PATH = _BASE_DIR / ".env"
 _HEADLESS_LOG_DIR = _BASE_DIR / "headlessLog"
 _DEFAULT_IDLE_TIMEOUT_SECONDS = 600
+_TELEGRAM_MAX_TEXT = 3900
 
 # Session state is isolated per Telegram chat id so multiple users can talk to
 # the bot simultaneously without sharing login state or quiz progress context.
@@ -108,6 +109,42 @@ def _sanitize_received_text_for_log(session: dict[str, Any], text: str) -> str:
     if handler == "LoginHandler" and state == "awaiting_password" and text.strip():
         return "<masked_password>"
     return text
+
+
+def _split_telegram_text(text: str, max_len: int = _TELEGRAM_MAX_TEXT) -> list[str]:
+    """Split long text into Telegram-safe chunks while preferring paragraph breaks."""
+    if len(text) <= max_len:
+        return [text]
+
+    chunks: list[str] = []
+    remaining = text
+    while len(remaining) > max_len:
+        split_at = remaining.rfind("\n\n", 0, max_len)
+        if split_at == -1:
+            split_at = remaining.rfind("\n", 0, max_len)
+        if split_at == -1:
+            split_at = max_len
+
+        chunk = remaining[:split_at].strip()
+        if not chunk:
+            chunk = remaining[:max_len]
+            split_at = max_len
+
+        chunks.append(chunk)
+        remaining = remaining[split_at:].lstrip()
+
+    if remaining:
+        chunks.append(remaining)
+    return chunks
+
+
+async def _reply_text_safely(update: Update, text: str) -> None:
+    """Send long responses in chunks so Telegram length limits do not fail sends."""
+    if update.message is None:
+        return
+
+    for part in _split_telegram_text(text):
+        await update.message.reply_text(part)
 
 
 def _new_session() -> dict[str, Any]:
@@ -247,7 +284,7 @@ async def start_command(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> 
 
     first_response = await _run_turn_with_typing(_context, chat_id, session, "")
     _append_activity_log(chat_id, user_id, "sent", first_response)
-    await update.message.reply_text(first_response)
+    await _reply_text_safely(update, first_response)
 
 
 async def reset_command(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -265,7 +302,7 @@ async def reset_command(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> 
     first_response = await _run_turn_with_typing(_context, chat_id, session, "")
     reset_response = "Session reset.\n\n" + first_response
     _append_activity_log(chat_id, user_id, "sent", reset_response)
-    await update.message.reply_text(reset_response)
+    await _reply_text_safely(update, reset_response)
 
 
 async def text_message(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -291,12 +328,21 @@ async def text_message(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> N
             + greeting
         )
         _append_activity_log(chat_id, user_id, "sent", expiry_response)
-        await update.message.reply_text(expiry_response)
+        await _reply_text_safely(update, expiry_response)
         return
 
-    response = await _run_turn_with_typing(_context, chat_id, session, text)
+    try:
+        response = await _run_turn_with_typing(_context, chat_id, session, text)
+    except Exception as exc:
+        logging.exception("Chat turn failed for chat_id=%s user_id=%s", chat_id, user_id)
+        response = (
+            "I hit an internal error while generating a reply. "
+            "Please try again or type 'exit' and re-enter chat mode."
+        )
+        _append_activity_log(chat_id, user_id, "sent", f"<internal_error: {exc}>")
+
     _append_activity_log(chat_id, user_id, "sent", response)
-    await update.message.reply_text(response)
+    await _reply_text_safely(update, response)
 
 
 def _resolve_bot_token() -> str:
