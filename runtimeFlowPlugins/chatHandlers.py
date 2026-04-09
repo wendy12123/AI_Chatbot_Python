@@ -47,6 +47,8 @@ _PREFLIGHT_STATUS = {
     "llm_error": None,
 }
 
+_LAST_LLM_RUNTIME_ERROR: str | None = None
+
 
 def _load_chat_settings() -> dict:
     """Load chat settings YAML and merge it with safe defaults."""
@@ -193,6 +195,7 @@ _RAG_DOCS, _RAG_IDF = _build_index()
 
 def _load_local_llm() -> tuple[Any | None, Any | None, str | None]:
     """Lazy-load tokenizer/model for local synthesis and cache the result."""
+    global _LAST_LLM_RUNTIME_ERROR
     if _LLM_CACHE["tokenizer"] is not None and _LLM_CACHE["model"] is not None:
         return _LLM_CACHE["tokenizer"], _LLM_CACHE["model"], None
     if _LLM_CACHE["load_attempted"]:
@@ -206,9 +209,11 @@ def _load_local_llm() -> tuple[Any | None, Any | None, str | None]:
 
         _LLM_CACHE["tokenizer"] = _AutoTokenizer.from_pretrained(_LLM_CHECKPOINT)
         _LLM_CACHE["model"] = _AutoModelForCausalLM.from_pretrained(_LLM_CHECKPOINT)
+        _LAST_LLM_RUNTIME_ERROR = None
         return _LLM_CACHE["tokenizer"], _LLM_CACHE["model"], None
     except (ImportError, OSError, RuntimeError, ValueError, TypeError) as exc:
         _LLM_CACHE["load_error"] = str(exc)
+        _LAST_LLM_RUNTIME_ERROR = f"{type(exc).__name__}: {exc}"
         return None, None, _LLM_CACHE["load_error"]
 
 
@@ -317,8 +322,11 @@ def _clean_llm_answer(decoded_text: str, prompt: str) -> str:
 
 def _synthesize_with_local_llm(query: str, hits: list[dict]) -> str | None:
     """Generate a concise grounded answer with the local causal model."""
+    global _LAST_LLM_RUNTIME_ERROR
     tokenizer, model, _err = _load_local_llm()
     if tokenizer is None or model is None:
+        if _err:
+            _LAST_LLM_RUNTIME_ERROR = str(_err)
         return None
 
     tokenizer_obj: Any = tokenizer
@@ -343,11 +351,14 @@ def _synthesize_with_local_llm(query: str, hits: list[dict]) -> str | None:
         decoded = _clean_llm_answer(decoded, prompt)
 
         if not decoded:
+            _LAST_LLM_RUNTIME_ERROR = "Empty decoded response from local LLM"
             return None
 
         source_lines = [f"[{idx}] {hit['source']}" for idx, hit in enumerate(hits, start=1)]
+        _LAST_LLM_RUNTIME_ERROR = None
         return decoded + "\n\nSources:\n" + "\n".join(source_lines) + "\n\nType 'exit' to return to the main menu."
-    except (RuntimeError, ValueError, TypeError, AttributeError):
+    except (RuntimeError, ValueError, TypeError, AttributeError) as exc:
+        _LAST_LLM_RUNTIME_ERROR = f"{type(exc).__name__}: {exc}"
         return None
 
 
@@ -364,7 +375,15 @@ def _build_rag_response(query: str) -> str:
     synthesized = _synthesize_with_local_llm(query, hits)
     if synthesized:
         return synthesized
-    return _build_extractive_response(hits)
+
+    fallback = _build_extractive_response(hits)
+    if _LAST_LLM_RUNTIME_ERROR:
+        return (
+            fallback
+            + "\n\n[Runtime note] Local LLM synthesis failed. "
+            + f"Reason: {_LAST_LLM_RUNTIME_ERROR}"
+        )
+    return fallback
 
 
 @runtimeFlowPlugins.register("ChatHandler")
