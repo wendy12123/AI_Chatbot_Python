@@ -50,6 +50,29 @@ _PREFLIGHT_STATUS = {
 _LAST_LLM_RUNTIME_ERROR: str | None = None
 
 
+def _model_is_quantized(model: Any) -> bool:
+    """Detect whether the loaded model is already managed by a quantized device map."""
+    return bool(
+        getattr(model, "is_loaded_in_4bit", False)
+        or getattr(model, "is_loaded_in_8bit", False)
+        or getattr(model, "hf_device_map", None)
+    )
+
+
+def _resolve_model_device(model: Any, fallback: str) -> str:
+    """Pick the device where inputs should be placed for the current model."""
+    hf_device_map = getattr(model, "hf_device_map", None)
+    if isinstance(hf_device_map, dict) and hf_device_map:
+        first_device = next(iter(hf_device_map.values()))
+        if isinstance(first_device, str) and first_device:
+            return first_device
+
+    try:
+        return str(next(model.parameters()).device)
+    except (AttributeError, StopIteration):
+        return fallback
+
+
 def _set_last_llm_runtime_error(msg: str | None) -> None:
     """Store the latest synthesis/runtime error note for fallback reporting."""
     globals()["_LAST_LLM_RUNTIME_ERROR"] = msg
@@ -211,8 +234,26 @@ def _load_local_llm() -> tuple[Any | None, Any | None, str | None]:
         from transformers import AutoModelForCausalLM as _AutoModelForCausalLM
         from transformers import AutoTokenizer as _AutoTokenizer
 
-        _LLM_CACHE["tokenizer"] = _AutoTokenizer.from_pretrained(_LLM_CHECKPOINT)
-        _LLM_CACHE["model"] = _AutoModelForCausalLM.from_pretrained(_LLM_CHECKPOINT)
+        tokenizer_kwargs: dict[str, Any] = {"use_fast": True}
+        model_kwargs: dict[str, Any] = {}
+
+        if _LLM_DEVICE == "cuda":
+            try:
+                from transformers import BitsAndBytesConfig as _BitsAndBytesConfig
+
+                model_kwargs["device_map"] = "auto"
+                model_kwargs["quantization_config"] = _BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_compute_dtype=_torch.float16,
+                    bnb_4bit_use_double_quant=True,
+                )
+            except (ImportError, ValueError, RuntimeError, TypeError):
+                # Fall back to the unquantized path if the quantization stack is unavailable.
+                pass
+
+        _LLM_CACHE["tokenizer"] = _AutoTokenizer.from_pretrained(_LLM_CHECKPOINT, **tokenizer_kwargs)
+        _LLM_CACHE["model"] = _AutoModelForCausalLM.from_pretrained(_LLM_CHECKPOINT, **model_kwargs)
         _set_last_llm_runtime_error(None)
         return _LLM_CACHE["tokenizer"], _LLM_CACHE["model"], None
     except (ImportError, OSError, RuntimeError, ValueError, TypeError) as exc:
@@ -366,7 +407,9 @@ def _synthesize_with_local_llm(query: str, hits: list[dict]) -> str | None:
     def _generate_once(target_device: str) -> str | None:
         # Keep model and input tensors on the same device to avoid runtime
         # errors like "Expected all tensors to be on the same device".
-        mdl.to(target_device)
+        model_device = _resolve_model_device(mdl, target_device)
+        if not _model_is_quantized(mdl):
+            mdl.to(model_device)
         mdl.eval()
 
         model_inputs = tokenizer_call(
@@ -375,7 +418,17 @@ def _synthesize_with_local_llm(query: str, hits: list[dict]) -> str | None:
             truncation=True,
             max_length=_LLM_MAX_INPUT_TOKENS,
         )
-        model_inputs = cast(Any, model_inputs).to(target_device)
+        model_inputs = cast(Any, model_inputs).to(model_device)
+        
+        # Debug: log device placement to verify GPU usage
+        try:
+            first_param = next(mdl.parameters())
+            model_device = str(first_param.device)
+        except StopIteration:
+            model_device = model_device if isinstance(model_device, str) else "unknown"
+        input_device = str(cast(Any, model_inputs).get("input_ids", _torch.tensor([])).device)
+        print(f"[LLM] Model device: {model_device}, Input device: {input_device}, Target: {target_device}")
+        
         with _torch.inference_mode():
             output_ids = model_generate(
                 **model_inputs,
@@ -392,7 +445,7 @@ def _synthesize_with_local_llm(query: str, hits: list[dict]) -> str | None:
     except (RuntimeError, ValueError, TypeError, AttributeError) as exc:
         # If CUDA runtime is unstable on this machine, retry once on CPU and
         # keep CPU as default for future turns.
-        if _LLM_DEVICE == "cuda" and _is_cuda_runtime_error(exc):
+        if _LLM_DEVICE == "cuda" and _is_cuda_runtime_error(exc) and not _model_is_quantized(mdl):
             try:
                 decoded = _generate_once("cpu")
                 globals()["_LLM_DEVICE"] = "cpu"
