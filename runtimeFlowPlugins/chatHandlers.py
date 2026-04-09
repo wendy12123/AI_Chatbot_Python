@@ -50,6 +50,11 @@ _PREFLIGHT_STATUS = {
 _LAST_LLM_RUNTIME_ERROR: str | None = None
 
 
+def _set_last_llm_runtime_error(msg: str | None) -> None:
+    """Store the latest synthesis/runtime error note for fallback reporting."""
+    globals()["_LAST_LLM_RUNTIME_ERROR"] = msg
+
+
 def _load_chat_settings() -> dict:
     """Load chat settings YAML and merge it with safe defaults."""
     if not CHAT_SETTINGS_PATH.exists():
@@ -195,7 +200,6 @@ _RAG_DOCS, _RAG_IDF = _build_index()
 
 def _load_local_llm() -> tuple[Any | None, Any | None, str | None]:
     """Lazy-load tokenizer/model for local synthesis and cache the result."""
-    global _LAST_LLM_RUNTIME_ERROR
     if _LLM_CACHE["tokenizer"] is not None and _LLM_CACHE["model"] is not None:
         return _LLM_CACHE["tokenizer"], _LLM_CACHE["model"], None
     if _LLM_CACHE["load_attempted"]:
@@ -209,11 +213,11 @@ def _load_local_llm() -> tuple[Any | None, Any | None, str | None]:
 
         _LLM_CACHE["tokenizer"] = _AutoTokenizer.from_pretrained(_LLM_CHECKPOINT)
         _LLM_CACHE["model"] = _AutoModelForCausalLM.from_pretrained(_LLM_CHECKPOINT)
-        _LAST_LLM_RUNTIME_ERROR = None
+        _set_last_llm_runtime_error(None)
         return _LLM_CACHE["tokenizer"], _LLM_CACHE["model"], None
     except (ImportError, OSError, RuntimeError, ValueError, TypeError) as exc:
         _LLM_CACHE["load_error"] = str(exc)
-        _LAST_LLM_RUNTIME_ERROR = f"{type(exc).__name__}: {exc}"
+        _set_last_llm_runtime_error(f"{type(exc).__name__}: {exc}")
         return None, None, _LLM_CACHE["load_error"]
 
 
@@ -320,13 +324,24 @@ def _clean_llm_answer(decoded_text: str, prompt: str) -> str:
     return text
 
 
+def _is_cuda_runtime_error(exc: Exception) -> bool:
+    """Detect CUDA runtime failures where retrying on CPU is safer."""
+    msg = f"{type(exc).__name__}: {exc}".lower()
+    markers = (
+        "cuda error",
+        "acceleratorerror",
+        "cudaerrorinvalidkernelimage",
+        "device kernel image is invalid",
+    )
+    return any(m in msg for m in markers)
+
+
 def _synthesize_with_local_llm(query: str, hits: list[dict]) -> str | None:
     """Generate a concise grounded answer with the local causal model."""
-    global _LAST_LLM_RUNTIME_ERROR
     tokenizer, model, _err = _load_local_llm()
     if tokenizer is None or model is None:
         if _err:
-            _LAST_LLM_RUNTIME_ERROR = str(_err)
+            _set_last_llm_runtime_error(str(_err))
         return None
 
     tok = cast(Any, tokenizer)
@@ -343,33 +358,49 @@ def _synthesize_with_local_llm(query: str, hits: list[dict]) -> str | None:
         return None
 
     prompt = _build_synthesis_prompt(query, hits)
-    try:
-        model_inputs = tok(
+
+    def _generate_once(target_device: str) -> str | None:
+        model_inputs = cast(Any, tok)(
             prompt,
             return_tensors="pt",
             truncation=True,
             max_length=_LLM_MAX_INPUT_TOKENS,
         )
-        model_inputs = cast(Any, model_inputs).to(_LLM_DEVICE)
-        output_ids = mdl.generate(
+        model_inputs = cast(Any, model_inputs).to(target_device)
+        output_ids = cast(Any, mdl).generate(
             **model_inputs,
             max_new_tokens=_LLM_MAX_NEW_TOKENS,
             do_sample=False,
             pad_token_id=getattr(tok, "eos_token_id", None),
         )
-        decoded = str(tok.decode(cast(Any, output_ids)[0], skip_special_tokens=True))
-        decoded = _clean_llm_answer(decoded, prompt)
+        decoded_text = str(cast(Any, tok).decode(cast(Any, output_ids)[0], skip_special_tokens=True))
+        decoded_text = _clean_llm_answer(decoded_text, prompt)
+        return decoded_text if decoded_text else None
 
-        if not decoded:
-            _LAST_LLM_RUNTIME_ERROR = "Empty decoded response from local LLM"
+    try:
+        decoded = _generate_once(_LLM_DEVICE)
+    except (RuntimeError, ValueError, TypeError, AttributeError) as exc:
+        # If CUDA runtime is unstable on this machine, retry once on CPU and
+        # keep CPU as default for future turns.
+        if _LLM_DEVICE == "cuda" and _is_cuda_runtime_error(exc):
+            try:
+                decoded = _generate_once("cpu")
+                globals()["_LLM_DEVICE"] = "cpu"
+                _set_last_llm_runtime_error(None)
+            except (RuntimeError, ValueError, TypeError, AttributeError) as retry_exc:
+                _set_last_llm_runtime_error(f"{type(retry_exc).__name__}: {retry_exc}")
+                return None
+        else:
+            _set_last_llm_runtime_error(f"{type(exc).__name__}: {exc}")
             return None
 
-        source_lines = [f"[{idx}] {hit['source']}" for idx, hit in enumerate(hits, start=1)]
-        _LAST_LLM_RUNTIME_ERROR = None
-        return decoded + "\n\nSources:\n" + "\n".join(source_lines) + "\n\nType 'exit' to return to the main menu."
-    except (RuntimeError, ValueError, TypeError, AttributeError) as exc:
-        _LAST_LLM_RUNTIME_ERROR = f"{type(exc).__name__}: {exc}"
+    if not decoded:
+        _set_last_llm_runtime_error("Empty decoded response from local LLM")
         return None
+
+    source_lines = [f"[{idx}] {hit['source']}" for idx, hit in enumerate(hits, start=1)]
+    _set_last_llm_runtime_error(None)
+    return decoded + "\n\nSources:\n" + "\n".join(source_lines) + "\n\nType 'exit' to return to the main menu."
 
 
 def _build_rag_response(query: str) -> str:
