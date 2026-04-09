@@ -1,0 +1,14 @@
+name: quiz
+patterns:
+- "I want to do a quiz"
+- "Start quiz"
+- "Let me take a quiz"
+- "Give me a quiz"
+- "Quiz time"
+- "I want to enter quiz"
+- "Test me"
+- "I want a practice quiz"
+responses:
+- "Sure, I can help you start a quiz."
+- "Great choice, let's begin a quiz."
+- "Okay, I will take you to the quiz flow."

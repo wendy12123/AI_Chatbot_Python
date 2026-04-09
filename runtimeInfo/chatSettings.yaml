@@ -1,0 +1,10 @@
+# Chat runtime settings
+# Set to false to disable NLP-based exit intent detection in chat mode.
+exit_intent_check_enabled: true
+
+# Exit is triggered when predicted exit intent confidence >= threshold.
+exit_intent_threshold: 0.6
+
+# Intent labels treated as exit intents by the NLP classifier.
+exit_intent_names:
+  - exit

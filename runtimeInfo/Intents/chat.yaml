@@ -1,0 +1,14 @@
+name: chat
+patterns:
+- "I want to chat"
+- "Let's chat"
+- "Chat with me"
+- "Can we talk"
+- "Open chat mode"
+- "I want to ask questions"
+- "Take me to chat"
+- "I need help understanding notes"
+responses:
+- "Sure, I will switch to chat mode."
+- "Okay, let's chat."
+- "Taking you to chat now."

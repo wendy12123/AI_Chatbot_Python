@@ -1,0 +1,14 @@
+name: exit
+patterns:
+- "exit"
+- "quit"
+- "bye"
+- "goodbye"
+- "I want to leave"
+- "end chat"
+- "stop"
+- "back to menu"
+responses:
+- "Alright, I can exit this flow for you."
+- "Okay, leaving now."
+- "Sure, I will stop here."

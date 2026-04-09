@@ -1,0 +1,47 @@
+name: Set 1
+description: "Basic Python and AI concepts quiz."
+questions:
+- question: "To access the value associated with a key in a dictionary, you use an index-like notation with ____ brackets."
+  type: "fill-in-the-blank"
+  capitalization: "disregard"
+  answer: 
+    - "square"
+    - "[]"
+  reason: "Both 'square' and '[]' are acceptable answers as they refer to the same type of brackets used for dictionary access. A example of this would be: my_dict['key'] to access the value associated with 'key' in the dictionary."
+- question: "The ____ method returns a view object that displays a list of a given dictionary's key-value tuple pairs."
+  type: "fill-in-the-blank"
+  capitalization: "regard"
+  answer: 
+    - "items()"
+  reason: "The items() method is used to retrieve a view object that contains the key-value pairs of a dictionary. This allows you to iterate over the dictionary's contents or convert it to a list of tuples for further processing." 
+- question: "A dictionary key must be of a/an ____ type."
+  capitalization: "disregard"
+  type: "fill-in-the-blank"
+  answer: 
+    - "immutable"
+  reason: "Dictionary keys must be of an immutable type, such as strings, numbers, or tuples. This is because the dictionary uses the hash value of the key to store and retrieve values efficiently. Mutable types like lists or other dictionaries cannot be used as keys because their hash value can change, leading to unpredictable behavior."
+- question: "Which of the following methods is used to remove an item with a specified key from a dictionary?"
+  type: "multiple-choice"
+  options:
+    - "pop()"
+    - "remove()"
+    - "delete()"
+    - "discard()"
+  answer: 1
+  reason: "The pop() method is used to remove an item with a specified key from a dictionary and returns the value associated with that key. The other options are not valid methods for removing items from a dictionary in Python."
+- question: |
+    What will be the output of the following code snippet?
+
+    Code:
+
+    my_dict = {'a': 1, 'b': 2, 'c': 3}
+    my_dict.update({'d': 4, 'a': 5})
+    print(my_dict)
+  type: "multiple-choice"
+  options:
+    - {'a': 1, 'b': 2, 'c': 3, 'd': 4} 
+    - {'d': 4, 'a': 5, 'b': 2, 'c': 3} 
+    - {'a': 5, 'b': 2, 'c': 3, 'd': 4} 
+    - It will raise an error.
+  answer: 3
+  reason: "The update() method updates the dictionary with the key-value pairs from another dictionary. If a key already exists, its value will be updated. In this case, the key 'a' is updated from 1 to 5, and the new key 'd' is added with the value 4. The final output will be {'a': 5, 'b': 2, 'c': 3, 'd': 4}."

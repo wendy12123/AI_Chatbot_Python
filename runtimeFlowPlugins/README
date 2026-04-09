@@ -1,0 +1,4 @@
+For future me:
+
+everything on runtimeFlowPlugins is registered as plugins using their filename and should be callable with string state, dict meta and string input text.
+every plugin should serve one flow; and plugin should only deal with their influence of control
