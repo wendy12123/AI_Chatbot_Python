@@ -348,32 +348,42 @@ def _synthesize_with_local_llm(query: str, hits: list[dict]) -> str | None:
     mdl = cast(Any, model)
 
     if not callable(getattr(tok, "__call__", None)):
-        _LAST_LLM_RUNTIME_ERROR = "Loaded tokenizer is not callable"
+        _set_last_llm_runtime_error("Loaded tokenizer is not callable")
         return None
     if not callable(getattr(tok, "decode", None)):
-        _LAST_LLM_RUNTIME_ERROR = "Loaded tokenizer has no callable decode()"
+        _set_last_llm_runtime_error("Loaded tokenizer has no callable decode()")
         return None
     if not callable(getattr(mdl, "generate", None)):
-        _LAST_LLM_RUNTIME_ERROR = "Loaded model has no callable generate()"
+        _set_last_llm_runtime_error("Loaded model has no callable generate()")
         return None
+
+    tokenizer_call = cast(Any, getattr(tok, "__call__"))
+    tokenizer_decode = cast(Any, getattr(tok, "decode"))
+    model_generate = cast(Any, getattr(mdl, "generate"))
 
     prompt = _build_synthesis_prompt(query, hits)
 
     def _generate_once(target_device: str) -> str | None:
-        model_inputs = cast(Any, tok)(
+        # Keep model and input tensors on the same device to avoid runtime
+        # errors like "Expected all tensors to be on the same device".
+        mdl.to(target_device)
+        mdl.eval()
+
+        model_inputs = tokenizer_call(
             prompt,
             return_tensors="pt",
             truncation=True,
             max_length=_LLM_MAX_INPUT_TOKENS,
         )
         model_inputs = cast(Any, model_inputs).to(target_device)
-        output_ids = cast(Any, mdl).generate(
-            **model_inputs,
-            max_new_tokens=_LLM_MAX_NEW_TOKENS,
-            do_sample=False,
-            pad_token_id=getattr(tok, "eos_token_id", None),
-        )
-        decoded_text = str(cast(Any, tok).decode(cast(Any, output_ids)[0], skip_special_tokens=True))
+        with _torch.inference_mode():
+            output_ids = model_generate(
+                **model_inputs,
+                max_new_tokens=_LLM_MAX_NEW_TOKENS,
+                do_sample=False,
+                pad_token_id=getattr(tok, "eos_token_id", None),
+            )
+        decoded_text = str(tokenizer_decode(cast(Any, output_ids)[0], skip_special_tokens=True))
         decoded_text = _clean_llm_answer(decoded_text, prompt)
         return decoded_text if decoded_text else None
 
