@@ -9,7 +9,7 @@ Design summary:
 import math
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 import runtimeFlowPlugins
 import yaml
 from runtimeSubmodules.chatbotNLP import predict_class
@@ -329,38 +329,35 @@ def _synthesize_with_local_llm(query: str, hits: list[dict]) -> str | None:
             _LAST_LLM_RUNTIME_ERROR = str(_err)
         return None
 
-    tokenizer_obj: Any = tokenizer
-    model_obj: Any = model
-    tokenizer_call = getattr(tokenizer_obj, "__call__", None)
-    tokenizer_decode = getattr(tokenizer_obj, "decode", None)
-    model_generate = getattr(model_obj, "generate", None)
+    tok = cast(Any, tokenizer)
+    mdl = cast(Any, model)
 
-    if not callable(tokenizer_call):
+    if not callable(getattr(tok, "__call__", None)):
         _LAST_LLM_RUNTIME_ERROR = "Loaded tokenizer is not callable"
         return None
-    if not callable(tokenizer_decode):
+    if not callable(getattr(tok, "decode", None)):
         _LAST_LLM_RUNTIME_ERROR = "Loaded tokenizer has no callable decode()"
         return None
-    if not callable(model_generate):
+    if not callable(getattr(mdl, "generate", None)):
         _LAST_LLM_RUNTIME_ERROR = "Loaded model has no callable generate()"
         return None
 
     prompt = _build_synthesis_prompt(query, hits)
     try:
-        model_inputs = tokenizer_call(
+        model_inputs = tok(
             prompt,
             return_tensors="pt",
             truncation=True,
             max_length=_LLM_MAX_INPUT_TOKENS,
         )
-        model_inputs = model_inputs.to(_LLM_DEVICE)
-        output_ids = model_generate(
+        model_inputs = cast(Any, model_inputs).to(_LLM_DEVICE)
+        output_ids = mdl.generate(
             **model_inputs,
             max_new_tokens=_LLM_MAX_NEW_TOKENS,
             do_sample=False,
-            pad_token_id=tokenizer_obj.eos_token_id,
+            pad_token_id=getattr(tok, "eos_token_id", None),
         )
-        decoded = tokenizer_decode(output_ids[0], skip_special_tokens=True)
+        decoded = str(tok.decode(cast(Any, output_ids)[0], skip_special_tokens=True))
         decoded = _clean_llm_answer(decoded, prompt)
 
         if not decoded:
