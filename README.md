@@ -63,7 +63,8 @@ The chatbot itself does not call an external LLM when responding to users. Inste
   - `encouragement/`: Encouragement message pools.
   - `userInfo/`: User profile records, password hash/salt, and quiz progress.
   - `ragKnowledge/`: Retrieval knowledge files used by chat. This content was prepared from lecture notes with Google Gemini.
-    - `ragKnowledge/`: Retrieval knowledge files used by chat. This content was prepared from lecture notes with Google Gemini.
+- `chatbotHeadlessTelegramBot.py`: Telegram runtime that uses the same plugin flow logic as the terminal chatbot.
+- `headlessLog/`: JSONL logs for Telegram incoming/outgoing messages.
 - `runtimeModels/`: Generated runtime artifacts.
 
 ## Runtime artifacts
@@ -165,6 +166,53 @@ Expected flow:
 3. On success, the bot hands off to the welcome/menu handler.
 4. The user can choose encouragement, quiz, or chat.
 
+## Start the Telegram bot
+
+Install dependency:
+
+```bash
+pip install python-telegram-bot
+```
+
+Set token in environment variable or `.env`:
+
+```env
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+```
+
+Optional timeout setting:
+
+```env
+TELEGRAM_IDLE_TIMEOUT_SECONDS=600
+```
+
+Run:
+
+```bash
+python chatbotHeadlessTelegramBot.py
+```
+
+Telegram runtime notes:
+
+- Uses the same plugin state machine (`handler`, `state`, `meta`) as `chatbotChatter.py`.
+- Maintains isolated per-chat sessions by Telegram `chat_id`.
+- Supports `/start` and `/reset` commands.
+- Sends typing indicators while slower responses are being generated.
+- Auto-resets idle sessions after `TELEGRAM_IDLE_TIMEOUT_SECONDS`.
+- Writes activity logs to `headlessLog/telegram_YYYY-MM-DD.jsonl`.
+
+Log fields currently include:
+
+- `timestamp_utc`
+- `chat_id`
+- `user_id`
+- `direction` (`received` or `sent`)
+- `text`
+
+Security note:
+
+- Password input received in `LoginHandler` password state is logged as `<masked_password>`.
+
 ## Flow handoff
 
 Each handler returns a dictionary with:
@@ -207,7 +255,6 @@ The runtime loop applies those values to the current conversation state. If a ha
 ## Notes and limitations
 
 - `chatbotNLP.py` loads the model and pickles on import, so missing runtime artifacts will stop the chatbot from starting.
-- The login code currently prints salted input during password checking; that should be removed before production use.
 - Malformed intent YAML raises `ValueError` by design.
 - Quiz matching supports exact, numeric, alias-like, and fuzzy matching, but ambiguous text can still select the wrong set.
 - The chat flow uses local retrieval from the files in `runtimeInfo/ragKnowledge/` and does not call external APIs.
