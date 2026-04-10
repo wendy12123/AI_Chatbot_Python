@@ -279,3 +279,6 @@ The runtime loop applies those values to the current conversation state. If a ha
 - Remove sensitive debug prints from login.
 - Add tests for plugin transitions and quiz evaluation.
 - Add schema checks for quiz and user YAML files.
+
+
+hihi i am here
