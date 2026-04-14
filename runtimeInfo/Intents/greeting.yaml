@@ -6,5 +6,15 @@ patterns:
 - "Good morning"
 - "Good afternoon"
 - "Good evening"
+- “Good day”
+- "Anyone?"
+- "Yo"
+- "Greetings"
+- "What's up"
+- "Anybody home"
+- "Excuse me"
+- "Sup"
+- "Hello there"
+- "Hi there"
 responses:
 - "Hello! I'm Yvonne from CPCE SPEED and I'm here to assist you in learning SEHS4678! You can chat with me, have quizzes or get encouragements! How can I help you today?"
