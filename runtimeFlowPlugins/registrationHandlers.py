@@ -25,6 +25,7 @@ def create_new_user(username, password):
     # Prepare user data to be written
     new_user_data = {
         "username": username,
+        "role": "student",
         "salt": salt,
         "hashed_password": hashed_password,
         "quiz_progress": {} # The quiz progress for new users is empty
