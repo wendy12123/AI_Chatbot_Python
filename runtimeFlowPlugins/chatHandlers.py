@@ -13,6 +13,7 @@ from typing import Any, cast
 import runtimeFlowPlugins
 import yaml
 from runtimeSubmodules.chatbotNLP import predict_class
+from .welcomeHandlers import get_return_to_menu_message
 import torch as _torch
 
 
@@ -505,16 +506,21 @@ def chat_handler(state, meta, inputText, _predictedIntent):
         )
 
     if state == CHAT_HOLD_STATE:
-        return _outcome("", "WelcomeHandler", "passoff", next_meta)
+        return _outcome(get_return_to_menu_message(), "WelcomeHandler", "passoff", next_meta)
 
     if _is_exit_text(inputText):
-        return _outcome("Leaving chat mode and returning to main menu.", "ChatHandler", CHAT_HOLD_STATE, next_meta)
+        return _outcome(
+            f"{get_return_to_menu_message()} (you typed 'exit')",
+            "ChatHandler",
+            CHAT_HOLD_STATE,
+            next_meta,
+        )
 
     if _EXIT_INTENT_ENABLED:
         is_exit_intent, confidence, _intent_name = _detect_exit_intent(inputText)
         if is_exit_intent:
             return _outcome(
-                f"Detected exit intent with confidence {confidence:.2f} (>= {_EXIT_INTENT_THRESHOLD:.2f}). Returning to main menu.",
+                f"{get_return_to_menu_message()} (detected exit intent with confidence {confidence:.2f}).",
                 "ChatHandler",
                 CHAT_HOLD_STATE,
                 next_meta,

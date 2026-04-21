@@ -47,7 +47,7 @@ _TELEGRAM_MAX_TEXT = 3900
 # Session state is isolated per Telegram chat id so multiple users can talk to
 # the bot simultaneously without sharing login state or quiz progress context.
 _SESSIONS: dict[int, dict[str, Any]] = {}
-
+_ACTIVE_USER_SESSIONS: dict[int, int] = {}  # Maps user_id to chat_id for active sessions (optional, can be used for advanced features)
 
 def _load_env_file(path: Path) -> None:
     """Load KEY=VALUE pairs from a simple .env file into os.environ if missing."""

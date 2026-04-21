@@ -11,6 +11,7 @@ import yaml
 import runtimeFlowPlugins
 
 from .encouragementGenerator import encouragement_switch
+from .welcomeHandlers import get_return_to_menu_message
 
 
 BASEPATH = Path(__file__).resolve().parent.parent
@@ -411,7 +412,7 @@ def quiz_handler(state, meta, inputText, predictedIntent):
 
     if state == QUIZ_MENU_HOLD_STATE:
         # Wait for one user input before handing off back to main menu.
-        return _outcome("", "WelcomeHandler", "passoff", next_meta)
+        return _outcome(get_return_to_menu_message(), "WelcomeHandler", "passoff", next_meta)
 
     if state == "awaiting_set_choice":
         username = str(next_meta.get("username", "")).strip()
@@ -447,7 +448,7 @@ def quiz_handler(state, meta, inputText, predictedIntent):
             return _outcome(response, "QuizHandler", "awaiting_answer", next_meta)
 
         if _is_exit_text(inputText):
-            return _outcome("Exiting quiz and returning to main menu.", "QuizHandler", QUIZ_MENU_HOLD_STATE, next_meta)
+            return _outcome(f"{get_return_to_menu_message()} (you typed 'exit')", "QuizHandler", QUIZ_MENU_HOLD_STATE, next_meta)
 
         if selected is None:
             return _outcome(
@@ -458,7 +459,7 @@ def quiz_handler(state, meta, inputText, predictedIntent):
             )
 
     if _is_exit_text(inputText):
-        return _outcome("Exiting quiz and returning to main menu.", "QuizHandler", QUIZ_MENU_HOLD_STATE, next_meta)
+        return _outcome(f"{get_return_to_menu_message()} (you typed 'exit')", "QuizHandler", QUIZ_MENU_HOLD_STATE, next_meta)
 
     if _wants_encouragement(inputText, predictedIntent):
         encouragement = encouragement_switch("any")
@@ -504,6 +505,6 @@ def quiz_handler(state, meta, inputText, predictedIntent):
 
         summary = f"Quiz complete: {active['name']}\nYour score: {final_score}/{total}."
         next_meta = _reset_quiz_runtime(next_meta)
-        return _outcome(final_feedback + summary + " Returning to the main menu.", "QuizHandler", QUIZ_MENU_HOLD_STATE, next_meta)
+        return _outcome(final_feedback + summary + f" {get_return_to_menu_message()}", "QuizHandler", QUIZ_MENU_HOLD_STATE, next_meta)
 
     return _start_menu(next_meta)
