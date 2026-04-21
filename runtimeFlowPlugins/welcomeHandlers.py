@@ -67,28 +67,53 @@ def welcome_handler(state, meta, inputText, predictedIntent):
     if state == "success":
         if inputText.strip().lower() == "change password":
             return {
-                "response": "To change your password, please enter your current password: ",
+                "response": "To change your password, please enter your current password:",
                 "next_handler": "SettingHandler",
                 "next_state": "verify_old_password",
-                "meta_update": nextMeta
-            }
-        if predictedIntent == "exit":
-            return {
-                "response": "Are you sure you want to end our conversation? (Type 'yes' to confirm, 'no' to cancel)",
-                "next_handler": nextHandler,
-                "next_state": "confirming_exit",
-                "meta_update": nextMeta
+                "meta_update": meta
             }
 
-    if predictedIntent == "encouragement":
-        nextResponse = encouragement_switch("any")
-    elif predictedIntent == "quiz":
-        nextHandler = "QuizHandler"
-        nextState = "passoff"
-    elif predictedIntent == "chat":
-        nextHandler = "ChatHandler"
-        nextState = "passoff"
-    else:
-        nextResponse = get_main_menu_message()
-        nextState = "success"
-    return {"response": nextResponse, "next_handler": nextHandler, "next_state": nextState, "meta_update": nextMeta}
+        elif predictedIntent == "exit":
+            # the "exit" action is determined based on the role
+            # retrieve the role from the meta list; if not found, default to student.
+            user_role = meta.get("role", "student") 
+            
+            # based on the role, determine the appropriate exit behavior
+            if user_role == "supervisor":
+                # if the user is a supervisor, "exit" means "return to admin panel"
+                return {
+                    "response": "Returning to Supervisor Admin Panel...",
+                    "next_handler": "SupervisorHandler", # go back to supervisor handler
+                    "next_state": "passoff", 
+                    "meta_update": meta
+                }
+            else:
+                # if the user is a student, "exit" means "end conversation"
+                return {
+                    "response": "Are you sure you want to end our conversation? (Type 'yes' to confirm, 'no' to cancel)",
+                    "next_handler": "WelcomeHandler",
+                    "next_state": "confirming_exit",
+                    "meta_update": meta
+                }
+
+        elif predictedIntent == "encouragement":
+            return {
+                "response": encouragement_switch("any") + "\n\n" + get_main_menu_message(),
+                "next_handler": "WelcomeHandler",
+                "next_state": "success",
+                "meta_update": meta
+            }
+
+        elif predictedIntent == "quiz":
+            return {"response": "", "next_handler": "QuizHandler", "next_state": "passoff", "meta_update": meta}
+            
+        elif predictedIntent == "chat":
+            return {"response": "", "next_handler": "ChatHandler", "next_state": "passoff", "meta_update": meta}
+            
+        else:
+            return {
+                "response": "Sorry, I didn't understand. " + get_main_menu_message(),
+                "next_handler": "WelcomeHandler",
+                "next_state": "success",
+                "meta_update": meta
+            }

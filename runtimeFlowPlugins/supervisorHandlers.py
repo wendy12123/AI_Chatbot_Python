@@ -78,7 +78,8 @@ def supervisor_handler(state, meta, inputText, predictedIntent):
             f"--- Dashboard Summary ---\n{avg_scores_summary}\n\n"
             "What would you like to do?\n"
             "1. View all student scores\n"
-            "2. Exit"
+            "2. Enter Student Main Menu\n"
+            "3. Exit"
         )
         return {
             "response": response,
@@ -97,7 +98,16 @@ def supervisor_handler(state, meta, inputText, predictedIntent):
                 "next_state": "awaiting_choice", # after viewing scores, still stay in the admin panel
                 "meta_update": meta
             }
-        elif choice == "2" or "exit" in choice:
+        elif choice == "2" or "student menu" in choice:
+            # 交接給 WelcomeHandler，就像學生登入一樣
+            return {
+                "response": "Entering student main menu...",
+                "next_handler": "WelcomeHandler",
+                "next_state": "passoff", # 觸發 WelcomeHandler 的歡迎流程
+                "meta_update": meta # 將包含 role='supervisor' 的 meta 傳過去
+            }
+        
+        elif choice == "3" or "exit" in choice:
             return {"response": "Goodbye, Supervisor!", "next_handler": "Main", "next_state": "exit", "meta_update": meta}
         elif "menu" in choice: # return to admin panel menu
              return {"response": "", "next_handler": "SupervisorHandler", "next_state": "passoff", "meta_update": meta}
