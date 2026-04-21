@@ -116,8 +116,8 @@ def _outcome(response: str, next_handler: str, next_state: str, meta: dict) -> d
     """Create the standard flow outcome object used by the runtime loop."""
     return {
         "response": response,
-        "next_handler": next_handler,
-        "next_state": next_state,
+        "next_handler": "WelcomeHandler",
+        "next_state": "return_to_menu", 
         "meta_update": meta,
     }
 
