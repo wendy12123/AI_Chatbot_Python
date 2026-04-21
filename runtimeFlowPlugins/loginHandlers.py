@@ -37,13 +37,23 @@ def login_handler(state, meta, inputText, predictedIntent):
     nextState = state
     nextMeta = meta
     #predictedIntent should be none for the first call, and then it will be updated based on the user's input and the flow's logic
-    if state == "start":
-        nextResponse = "Hello! I'm Snackie from CPCE SPEED and I'm here to assist you in learning SEHS4678! You can chat with me, have quizzes or get encouragements! \n Please enter your username to get started."
+    if state == "start" or state == "passoff":
+        nextResponse = "Hello! I'm Snackie from CPCE SPEED and I'm here to assist you in learning SEHS4678! You can chat with me, have quizzes or get encouragements! \n Please enter your username to get started, or type 'register' to create a new account."
         nextState = "awaiting_username"
+        return {"response": nextResponse, "next_handler": nextHandler, "next_state": nextState, "meta_update": nextMeta}
+    
     if state == "awaiting_username":
+        if inputText.strip().lower() == 'register':
+            return {
+                "response": "", # RegistrationHandler response will be provided
+                "next_handler": "RegistrationHandler", 
+                "next_state": "passoff",
+                "meta_update": meta
+            }
         nextResponse = "Please enter your password."
         nextState = "awaiting_password"
         nextMeta["username"] = inputText
+        return {"response": nextResponse, "next_handler": nextHandler, "next_state": nextState, "meta_update": nextMeta}
     if state == "awaiting_password":
         username = meta.get("username")
         password = inputText
