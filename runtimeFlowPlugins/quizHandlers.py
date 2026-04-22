@@ -24,8 +24,8 @@ def _outcome(response: str, next_handler: str, next_state: str, meta: dict) -> d
     """Create the standardized flow outcome object expected by runtime."""
     return {
         "response": response,
-        "next_handler": "WelcomeHandler",
-        "next_state": "return_to_menu",
+        "next_handler": next_handler,
+        "next_state": next_state,
         "meta_update": meta,
     }
 
@@ -417,11 +417,6 @@ def quiz_handler(state, meta, inputText, predictedIntent):
     if state == "awaiting_set_choice":
         username = str(next_meta.get("username", "")).strip()
 
-        if _wants_encouragement(inputText, predictedIntent):
-            encouragement = encouragement_switch("any")
-            suffix = "\nYou can continue the quiz, ask for all sets, or type exit."
-            return _outcome(encouragement + suffix, "QuizHandler", state, next_meta)
-
         if _wants_all_sets(inputText):
             all_choices = next_meta.get("quiz_all_choices", [])
             if not all_choices:
@@ -432,6 +427,11 @@ def quiz_handler(state, meta, inputText, predictedIntent):
             next_meta["quiz_choices"] = all_choices
             response = _format_all_sets_status(username) + "\n\n" + _format_set_choices(all_choices)
             return _outcome(response, "QuizHandler", "awaiting_set_choice", next_meta)
+        
+        if _wants_encouragement(inputText, predictedIntent):
+            encouragement = encouragement_switch("any")
+            suffix = "\nYou can continue the quiz, ask for all sets, or type exit."
+            return _outcome(encouragement + suffix, "QuizHandler", state, next_meta)
 
         choices = next_meta.get("quiz_choices", [])
         selected = _select_choice(inputText, choices)
@@ -503,8 +503,21 @@ def quiz_handler(state, meta, inputText, predictedIntent):
         if not correct:
             final_feedback = _format_wrong_feedback(current_question) + "\n"
 
-        summary = f"Quiz complete: {active['name']}\nYour score: {final_score}/{total}."
+        percentage = (final_score / total) * 100 
+        if percentage == 100:
+            support_msg = "It's a great day to learn new things!\n"
+        elif percentage >= 60:
+            support_msg = "You can do anything you set your mind to!\n"
+        elif percentage >= 40:
+            support_msg = "if(life.gives('bugs')):\n    debug()\nelse:\n    keep_going()\n"
+        elif percentage >= 20:
+            support_msg = "Coding is like a game. The more you play, the better you get!\n"
+        else:
+            support_msg = "Mistakes are proof that you are trying!\n"
+
+
+        summary = f"Quiz complete: {active['name']}\nYour score: {final_score}/{total}.\n{support_msg}"
         next_meta = _reset_quiz_runtime(next_meta)
-        return _outcome(final_feedback + summary + f" {get_return_to_menu_message()}", "QuizHandler", QUIZ_MENU_HOLD_STATE, next_meta)
+        return _outcome(final_feedback + summary, "QuizHandler", "passoff", next_meta)
 
     return _start_menu(next_meta)
