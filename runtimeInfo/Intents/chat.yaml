@@ -14,6 +14,8 @@ patterns:
 - "I want to discuss a topic"
 - "Can you tell me more?"
 - "Teach me something"
+- "Chat"
+- "chat"
 responses:
 - "Sure, I will switch to chat mode."
 - "Okay, let's chat."

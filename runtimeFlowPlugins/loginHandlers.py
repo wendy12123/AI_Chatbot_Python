@@ -18,14 +18,12 @@ class LoginResult(Enum):
     NO_USER = auto()
     WRONG_PASSWORD = auto()
 
-# --- ✨ 1. 新增一個輔助函數來讀取用戶資料 ✨ ---
 def get_user_data(username):
-    """讀取指定用戶的 YAML 檔案並返回其數據。"""
+    """read YAML file and return its data."""
     user_file = USERFILEPATH / f"{username}.yaml"
     if not user_file.exists():
         return None
     with open(user_file, "r", encoding="utf-8") as f:
-        # 使用 try-except 來安全地加載，以防檔案為空或格式錯誤
         try:
             data = yaml.safe_load(f)
             return data if isinstance(data, dict) else {}
@@ -69,20 +67,16 @@ def login_handler(state, meta, inputText, predictedIntent):
         nextMeta["username"] = inputText
         return {"response": nextResponse, "next_handler": nextHandler, "next_state": nextState, "meta_update": nextMeta}
     
-    # --- ✨ 2. 主要修改在這裡 ✨ ---
     if state == "awaiting_password":
         username = meta.get("username")
         password = inputText
         login_result = passwordChecker(username, password)
 
         if login_result == LoginResult.SUCCESS:
-            # --- 登入成功！現在進行路由判斷 ---
             user_data = get_user_data(username)
-            # 如果 YAML 檔案中沒有 role 欄位，預設為 'student'
+            # default to "student" role if not specified
             role = user_data.get("role", "student") 
 
-            # 準備要傳遞給下一個 handler 的 meta
-            # 確保包含了 username 和 role，這對後續所有操作都很有用
             meta_for_next_flow = {
                 "username": username,
                 "role": role,
@@ -90,7 +84,7 @@ def login_handler(state, meta, inputText, predictedIntent):
             }
 
             if role == "supervisor":
-                # 如果是導師，交接給 SupervisorHandler
+                # if the user is a supervisor, route them to the SupervisorHandler
                 return {
                     "response": f"Login successful. Welcome, Supervisor {username}!",
                     "next_handler": "SupervisorHandler",
@@ -98,7 +92,7 @@ def login_handler(state, meta, inputText, predictedIntent):
                     "meta_update": meta_for_next_flow
                 }
             else:
-                # 預設行為：所有其他角色 (包括 student) 都進入 WelcomeHandler
+                # if the user is a student, route them to the WelcomeHandler (main menu)
                 return {
                     "response": f"Login successful. Welcome, {username}!",
                     "next_handler": "WelcomeHandler",
@@ -112,12 +106,9 @@ def login_handler(state, meta, inputText, predictedIntent):
         elif login_result == LoginResult.WRONG_PASSWORD:
             nextResponse = "Incorrect password. Please enter your password again."
             nextState = "awaiting_password"
-            
-        # 注意：這裡的 return 必須在 if login_result 判斷的外面
-        # 但在 if state == "awaiting_password" 的裡面
+              
         return {"response": nextResponse, "next_handler": nextHandler, "next_state": nextState, "meta_update": nextMeta}
 
-    # 如果 state 不是上面任何一個，返回一個錯誤訊息或重置
     return {"response": "An unexpected error occurred in login. Returning to start.", "next_handler": "LoginHandler", "next_state": "start", "meta_update": {}}
 
 def passwordChecker(username, password):

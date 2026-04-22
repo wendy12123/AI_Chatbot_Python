@@ -8,6 +8,8 @@ patterns:
 - "I want to enter quiz"
 - "Test me"
 - "I want a practice quiz"
+- "quiz"
+- "quiz me"
 responses:
 - "Sure, I can help you start a quiz."
 - "Great choice, let's begin a quiz."

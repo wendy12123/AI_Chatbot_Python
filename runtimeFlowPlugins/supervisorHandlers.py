@@ -99,12 +99,12 @@ def supervisor_handler(state, meta, inputText, predictedIntent):
                 "meta_update": meta
             }
         elif choice == "2" or "student menu" in choice:
-            # 交接給 WelcomeHandler，就像學生登入一樣
+            # give supervisors access to the student main menu, but their role in meta is still "supervisor", so they will see the supervisor-specific options in the main menu.
             return {
                 "response": "Entering student main menu...",
                 "next_handler": "WelcomeHandler",
-                "next_state": "passoff", # 觸發 WelcomeHandler 的歡迎流程
-                "meta_update": meta # 將包含 role='supervisor' 的 meta 傳過去
+                "next_state": "passoff", 
+                "meta_update": meta # role='supervisor' is preserved in meta
             }
         
         elif choice == "3" or "exit" in choice:
