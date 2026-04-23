@@ -141,6 +141,8 @@ def setting_handler(state, meta, inputText, predictedIntent):
             return {"response": "Incorrect password. Please try again or type 'exit' to cancel: ", "next_handler": nextHandler, "next_state": "verify_old_password", "meta_update": nextMeta}
     if state == "enter_new_password":
         new_password = inputText
+        if len(new_password) < 6:
+            return {"response": "Password must be at least 6 characters long. Please enter a new password: ", "next_handler": nextHandler, "next_state": "enter_new_password", "meta_update": nextMeta}
         update_password(username, new_password)
         return {"response": "Your password has been updated successfully.", "next_handler": "WelcomeHandler", "next_state": "passoff", "meta_update": nextMeta}
     return {"response": "Something went wrong. Returning to menu.", "next_handler": "WelcomeHandler", "next_state": "passoff", "meta_update": nextMeta}
