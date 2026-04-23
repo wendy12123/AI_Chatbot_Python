@@ -11,6 +11,7 @@ import yaml
 import runtimeFlowPlugins
 
 from .encouragementGenerator import encouragement_switch
+from .welcomeHandlers import generate_welcome_greeting
 
 
 BASEPATH = Path(__file__).resolve().parent.parent
@@ -431,8 +432,9 @@ def quiz_handler(state, meta, inputText, predictedIntent):
             return _outcome(response, "QuizHandler", "awaiting_completed_choice", next_meta)
 
         elif choice == "3" or "menu" in choice or _is_exit_text(inputText):
-            # User wants main menu
-            return _outcome("Okay, returning to main menu.", "WelcomeHandler", "return_to_menu", next_meta)
+            # Direct return to main menu with the full welcome greeting.
+            response = generate_welcome_greeting(meta)
+            return _outcome(response, "WelcomeHandler", "success", next_meta)
             
         else:
             return _outcome("Please choose 1, 2, or 3.", "QuizHandler", "awaiting_completed_choice", next_meta)
@@ -467,7 +469,8 @@ def quiz_handler(state, meta, inputText, predictedIntent):
             return _outcome(response, "QuizHandler", "awaiting_answer", next_meta)
 
         if _is_exit_text(inputText):
-            return _outcome(f"Returning to main menu. (you typed '{inputText.strip()}')", "WelcomeHandler", "return_to_menu", next_meta)
+            response = generate_welcome_greeting(meta)
+            return _outcome(response, "WelcomeHandler", "success", next_meta)
 
         return _outcome("Please choose one of the displayed set numbers, or type 'all sets'.", "QuizHandler", "awaiting_set_choice", next_meta)
 

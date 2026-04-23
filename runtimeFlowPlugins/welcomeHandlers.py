@@ -58,29 +58,50 @@ def welcome_handler(state, meta, inputText, predictedIntent):
     # quiz -> call and hand off to quiz flow, and then come back to main menu after quiz is done
     # chat -> call and hand off to chat flow, and then come back to main menu after user says they want to exit the chat
     # capture any handoffs and do not handoff from here unless it is from a success state after this intent has handled once 
+def generate_welcome_greeting(meta) -> str:
+    """Generate a personalized welcome greeting based on quiz performance."""
+    username = meta.get("username", "Student")
+    quiz_progress = meta.get("quiz_progress")
+    avg_score = calculate_average_score(quiz_progress)
+
+    if avg_score is not None and avg_score < 40:
+        encouragement = encouragement_switch("custom", tag="struggling_encouragements")
+        greeting = (
+            f"Welcome back, {username}. I noticed your average quiz score is a bit low. {encouragement} "
+            "No worries, we can improve together!"
+        )
+    elif not quiz_progress:
+        encouragement = encouragement_switch("custom", tag="generic_encouragements")
+        greeting = (
+            f"Welcome, {username}! It looks like you're new here. {encouragement} "
+            "I'm ready to help you learn. What would you like to do first?"
+        )
+    else:
+        encouragement = encouragement_switch("custom", tag="generic_encouragements")
+        greeting = (
+            f"Welcome back, {username}! You're doing great. {encouragement} "
+            "What would you like to do today? (encouragement, quiz, chat)"
+        )
+    
+    return greeting + "\n\n" + MAIN_MENU_WELCOME_MESSAGE
+
+
+@runtimeFlowPlugins.register("WelcomeHandler")
+def welcome_handler(state, meta, inputText, predictedIntent):
+    """Route menu-level intents and return standardized flow outcomes."""
+    #defaults: 
+    nextHandler = "WelcomeHandler"
+    nextResponse = ""
+    nextState = state
+    nextMeta = meta
+
+    # intent points to different flows:
+    # encouragement -> call encouragement for a encouragement response and then come back
+    # quiz -> call and hand off to quiz flow, and then come back to main menu after quiz is done
+    # chat -> call and hand off to chat flow, and then come back to main menu after user says they want to exit the chat
+    # capture any handoffs and do not handoff from here unless it is from a success state after this intent has handled once 
     if state == "passoff":
-        username = meta.get("username", "Student")
-        quiz_progress = meta.get("quiz_progress")
-        avg_score = calculate_average_score(quiz_progress)
-
-        if avg_score is not None and avg_score < 40:
-            encouragement = encouragement_switch("custom", tag="struggling_encouragements")
-            greeting = (
-                f"Welcome back, {username}. I noticed your average quiz score is a bit low. {encouragement} "
-                "No worries, we can improve together!"
-            )
-        elif not quiz_progress:
-            encouragement = encouragement_switch("custom", tag="generic_encouragements")
-            greeting = (
-                f"Welcome, {username}! It looks like you're new here. {encouragement} "
-            )
-        else:
-            encouragement = encouragement_switch("custom", tag="generic_encouragements")
-            greeting = (
-                f"Welcome back, {username}! You're doing great. {encouragement} "
-            )
-
-        nextResponse = greeting + "\n\n" + MAIN_MENU_WELCOME_MESSAGE
+        nextResponse = generate_welcome_greeting(meta)
         nextState = "success"
         return {"response": nextResponse, "next_handler": nextHandler, "next_state": nextState, "meta_update": nextMeta}
     
