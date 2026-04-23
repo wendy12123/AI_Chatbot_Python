@@ -1,22 +1,43 @@
 encouragements:
-- "Coding is like a game. The more you play, the better you get!"
-- "You are doing better than you think. Keep going."
-- "One step at a time. You have got this."
-- "Progress matters more than perfection. Keep moving forward."
-- "Every 'Hello World' is the start of a superpower."
-- "Any fool can write code that a computer can understand. Good programmers write code that humans can understand. - Martin Fowler, Refactoring"
-- "Don't be afraid to fail, get stuck in code!"
-- "Have enough confidence to believe in yourself"
-- "The only way to learn a new programming language is by writing programs in it."
-- "Programming isn't about what you know; it's about what you can figure out."
-- "Programming isn't about what you know; it's about what you can figure out"
-- "Design is the art of arranging code to work today, and be changeable forever."
-- “The best way to predict the future is to invent it.”
-- “Programming is the art of telling a computer what to do.” 
-- "The best way to learn to code is to write code. Don't be afraid to make mistakes, it's all part of the learning process!"
-- "Remember, every expert was once a beginner. Keep pushing forward and you'll get there!"
-- "Don't worry about being perfect. Just focus on making progress and learning from your mistakes."
-- "Coding is a journey, not a destination. Enjoy the process and keep learning!"
-- "Every line of code you write is a step towards becoming a better programmer. Keep going!"
-- "Don't be discouraged by challenges. They are opportunities to learn and grow as a programmer."
-- "Believe in yourself and your ability to learn. You can do this!"
+any: 
+  - "Coding is like a game. The more you play, the better you get!"
+  - "You are doing better than you think. Keep going."
+  - "One step at a time. You have got this."
+  - "Progress matters more than perfection. Keep moving forward."
+  - "Every 'Hello World' is the start of a superpower."
+  - "Any fool can write code that a computer can understand. Good programmers write code that humans can understand. - Martin Fowler, Refactoring"
+  - "Don't be afraid to fail, get stuck in code!"
+  - "Have enough confidence to believe in yourself"
+  - "The only way to learn a new programming language is by writing programs in it."
+  - "Programming isn't about what you know; it's about what you can figure out."
+  - "Programming isn't about what you know; it's about what you can figure out"
+  - "Design is the art of arranging code to work today, and be changeable forever."
+  - “The best way to predict the future is to invent it.”
+  - “Programming is the art of telling a computer what to do.” 
+  - "The best way to learn to code is to write code. Don't be afraid to make mistakes, it's all part of the learning process!"
+  - "Remember, every expert was once a beginner. Keep pushing forward and you'll get there!"
+  - "Don't worry about being perfect. Just focus on making progress and learning from your mistakes."
+  - "Coding is a journey, not a destination. Enjoy the process and keep learning!"
+  - "Every line of code you write is a step towards becoming a better programmer. Keep going!"
+  - "Don't be discouraged by challenges. They are opportunities to learn and grow as a programmer."
+  - "Believe in yourself and your ability to learn. You can do this!"
+
+# For quiz results
+tiered: 
+  mastery: # Score = 100
+    - "Any fool can write code that a computer can understand. Good programmers write code that humans can understand. - Martin Fowler, Refactoring"
+    - "It's a great day to learn new things!"
+  competence: # Score >= 60
+    - "Every 'Hello World' is the start of a superpower."
+    - "You can do anything you set your mind to!"
+  confidence: # Score >= 40
+    - "Have enough confidence to believe in yourself"
+    - "if(life.gives('bugs')):\n    debug()\nelse:\n    keep_going()"
+  growth: # Score >= 20
+    - "Progress matters more than perfection. Keep moving forward."
+    - "Coding is like a game. The more you play, the better you get!"
+  support: # Score < 20
+    - "You are doing better than you think. Keep going."
+    - "One step at a time. You have got this."
+    - "Don't be afraid to fail, get stuck in code!"
+    - "Mistakes are proof that you are trying!"

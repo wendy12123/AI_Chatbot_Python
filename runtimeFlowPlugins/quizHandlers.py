@@ -505,18 +505,19 @@ def quiz_handler(state, meta, inputText, predictedIntent):
 
         percentage = (final_score / total) * 100 
         if percentage == 100:
-            support_msg = "It's a great day to learn new things!\n"
+            tag = "mastery"
         elif percentage >= 60:
-            support_msg = "You can do anything you set your mind to!\n"
+            tag = "competence"
         elif percentage >= 40:
-            support_msg = "if(life.gives('bugs')):\n    debug()\nelse:\n    keep_going()\n"
+            tag = "confidence"
         elif percentage >= 20:
-            support_msg = "Coding is like a game. The more you play, the better you get!\n"
+            tag = "growth"
         else:
-            support_msg = "Mistakes are proof that you are trying!\n"
+            tag = "support"
+        emotional_support = encouragement_switch("tiered", tag=tag)
 
 
-        summary = f"Quiz complete: {active['name']}\nYour score: {final_score}/{total}.\n{support_msg}"
+        summary = f"Quiz complete: {active['name']}\nYour score: {final_score}/{total}.\n{emotional_support}"
         next_meta = _reset_quiz_runtime(next_meta)
         return _outcome(final_feedback + summary, "QuizHandler", "passoff", next_meta)
 
