@@ -44,14 +44,14 @@ def calculate_average_score(quiz_progress) -> float | None:
         return None
     return (total_score / total_questions) * 100
 
-@runtimeFlowPlugins.register("WelcomeHandler")
-def welcome_handler(state, meta, inputText, predictedIntent):
-    """Route menu-level intents and return standardized flow outcomes."""
-    #defaults: 
-    nextHandler = "WelcomeHandler"
-    nextResponse = ""
-    nextState = state
-    nextMeta = meta
+#@runtimeFlowPlugins.register("WelcomeHandler")
+#def welcome_handler(state, meta, inputText, predictedIntent):
+#    """Route menu-level intents and return standardized flow outcomes."""
+#    #defaults: 
+#    nextHandler = "WelcomeHandler"
+#    nextResponse = ""
+#    nextState = state
+#    nextMeta = meta
 
     # intent points to different flows:
     # encouragement -> call encouragement for a encouragement response and then come back

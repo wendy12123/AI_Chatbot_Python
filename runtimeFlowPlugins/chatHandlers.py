@@ -1,15 +1,18 @@
-"""Chat flow plugin with local retrieval and optional local LLM synthesis.
+"""Chat flow plugin with local retrieval and optional LLM synthesis.
 
 Design summary:
 - Retrieves relevant snippets from local files in `runtimeInfo/ragKnowledge`.
-- Optionally synthesizes a concise answer using a local Hugging Face model.
+- Synthesizes answers via either an external OpenAI-compatible API (e.g. LM Studio)
+  or an in-process Hugging Face model, controlled by `llm_mode` in chatSettings.
 - Keeps conversation state in plugin-style outcomes for runtime handoff.
 """
 
 import math
 import re
+import logging
 from pathlib import Path
 from typing import Any, cast
+import requests
 import runtimeFlowPlugins
 import yaml
 from runtimeSubmodules.chatbotNLP import predict_class
@@ -32,6 +35,13 @@ _DEFAULT_CHAT_SETTINGS = {
     "exit_intent_check_enabled": True,
     "exit_intent_threshold": 0.6,
     "exit_intent_names": ["exit"],
+    "llm_mode": "internal",
+    "external_llm": {
+        "base_url": "http://localhost:1234/v1",
+        "model": "",
+        "timeout": 60,
+        "fail_soft": False,
+    },
 }
 
 _LLM_CACHE = {
@@ -111,13 +121,32 @@ else:
 if not _EXIT_INTENT_NAMES:
     _EXIT_INTENT_NAMES = {"exit"}
 
+_LLM_MODE = str(_CHAT_SETTINGS.get("llm_mode", "internal")).strip().lower()
+if _LLM_MODE not in ("external", "internal", "disabled"):
+    _LLM_MODE = "internal"
+
+_ext_cfg = _CHAT_SETTINGS.get("external_llm", {})
+if not isinstance(_ext_cfg, dict):
+    _ext_cfg = {}
+_EXTERNAL_LLM_BASE_URL = str(_ext_cfg.get("base_url", "http://localhost:1234/v1")).rstrip("/")
+_EXTERNAL_LLM_MODEL = str(_ext_cfg.get("model", ""))
+try:
+    _EXTERNAL_LLM_TIMEOUT = int(_ext_cfg.get("timeout", 60))
+except (TypeError, ValueError):
+    _EXTERNAL_LLM_TIMEOUT = 60
+_EXTERNAL_LLM_FAIL_SOFT = bool(_ext_cfg.get("fail_soft", False))
+try:
+    _EXTERNAL_LLM_MAX_TOKENS = int(_ext_cfg.get("max_tokens", 1024))
+except (TypeError, ValueError):
+    _EXTERNAL_LLM_MAX_TOKENS = 1024
+
 
 def _outcome(response: str, next_handler: str, next_state: str, meta: dict) -> dict:
     """Create the standard flow outcome object used by the runtime loop."""
     return {
         "response": response,
-        "next_handler": "WelcomeHandler",
-        "next_state": "return_to_menu", 
+        "next_handler": next_handler,
+        "next_state": next_state,
         "meta_update": meta,
     }
 
@@ -158,6 +187,61 @@ def _tokenize(text: str) -> list[str]:
     return [t.lower() for t in _WORD_RE.findall(text or "")]
 
 
+_ACRONYM_EXPANSIONS = {
+    "ai": "artificial intelligence",
+    "ml": "machine learning",
+    "dl": "deep learning",
+    "ani": "artificial narrow intelligence",
+    "agi": "artificial general intelligence",
+    "asi": "artificial super intelligence",
+    "gpu": "graphics processing unit",
+    "tpu": "tensor processing unit",
+    "dfs": "depth first search",
+    "bfs": "breadth first search",
+    "gbfs": "greedy best first search",
+    "a*": "a star search",
+    "mabp": "multi armed bandit problem",
+    "ctr": "click through rate",
+    "ann": "artificial neural network",
+    "lifo": "last in first out",
+    "fifo": "first in first out",
+    "relu": "rectified linear unit",
+    "gd": "gradient descent",
+    "sgd": "stochastic gradient descent",
+    "cnn": "convolutional neural network",
+    "rgb": "red green blue",
+    "nlp": "natural language processing",
+    "nltk": "natural language toolkit",
+    "bow": "bag of words",
+    "oov": "out of vocabulary",
+    "rnn": "recurrent neural network",
+    "llm": "large language model",
+    "rag": "retrieval augmented generation",
+    "svm": "support vector machine",
+    "aws": "amazon web services",
+    "oop": "object oriented programming",
+    "pep": "python enhancement proposal",
+    "pep8": "python enhancement proposal 8",
+    "cpu": "central processing unit",
+    "numpy": "numerical python",
+}
+
+
+def _preprocess_query(query: str) -> str:
+    """Expand known acronyms in the query to improve TF-IDF matching."""
+    text = (query or "").strip()
+    if not text:
+        return text
+    lower = text.lower()
+    expansions = []
+    for acronym, expansion in _ACRONYM_EXPANSIONS.items():
+        if acronym in lower:
+            expansions.append(expansion)
+    if expansions:
+        return text + " " + " ".join(expansions)
+    return text
+
+
 def _iter_knowledge_files() -> list[Path]:
     """List knowledge files that are eligible for retrieval indexing."""
     files: list[Path] = []
@@ -172,22 +256,37 @@ def _iter_knowledge_files() -> list[Path]:
     return sorted(files)
 
 
-def _chunk_text(text: str, max_lines: int = 10) -> list[str]:
-    """Split text into compact line-based chunks for retrieval."""
-    lines = [ln.strip() for ln in (text or "").splitlines()]
-    lines = [ln for ln in lines if ln]
-    if not lines:
-        return []
+def _chunk_text(text: str, max_lines: int = 20) -> list[str]:
+    """Split markdown text on heading boundaries; sub-chunk if still too long."""
+    lines = (text or "").splitlines()
+    sections: list[list[str]] = []
+    current: list[str] = []
+
+    for line in lines:
+        if line.startswith("##") and current:
+            sections.append(current)
+            current = []
+        current.append(line)
+    if current:
+        sections.append(current)
 
     chunks: list[str] = []
-    cur: list[str] = []
-    for line in lines:
-        cur.append(line)
-        if len(cur) >= max_lines:
-            chunks.append("\n".join(cur))
-            cur = []
-    if cur:
-        chunks.append("\n".join(cur))
+    for section in sections:
+        non_empty = [ln for ln in section if ln.strip()]
+        if len(non_empty) <= max_lines:
+            chunk = "\n".join(section).strip()
+            if chunk:
+                chunks.append(chunk)
+        else:
+            sub_lines = [ln.strip() for ln in section if ln.strip()]
+            cur: list[str] = []
+            for ln in sub_lines:
+                cur.append(ln)
+                if len(cur) >= max_lines:
+                    chunks.append("\n".join(cur))
+                    cur = []
+            if cur:
+                chunks.append("\n".join(cur))
     return chunks
 
 
@@ -203,6 +302,7 @@ def _build_index() -> tuple[list[dict], dict[str, float]]:
             continue
 
         rel_path = str(path.relative_to(BASEPATH))
+        stem_tokens = set(_tokenize(path.stem.lower()))
         for chunk in _chunk_text(content):
             tokens = _tokenize(chunk)
             if not tokens:
@@ -210,7 +310,7 @@ def _build_index() -> tuple[list[dict], dict[str, float]]:
             tf: dict[str, int] = {}
             for tok in tokens:
                 tf[tok] = tf.get(tok, 0) + 1
-            docs.append({"source": rel_path, "chunk": chunk, "tf": tf, "tokens": set(tokens)})
+            docs.append({"source": rel_path, "chunk": chunk, "tf": tf, "tokens": set(tokens), "stem_tokens": stem_tokens})
             for tok in set(tokens):
                 df[tok] = df.get(tok, 0) + 1
 
@@ -263,15 +363,51 @@ def _load_local_llm() -> tuple[Any | None, Any | None, str | None]:
         return None, None, _LLM_CACHE["load_error"]
 
 
+def _ping_external_llm() -> tuple[bool, str]:
+    """Check if the external LLM API is reachable and return status."""
+    try:
+        resp = requests.get(
+            f"{_EXTERNAL_LLM_BASE_URL}/v1/models",
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        models = data.get("data", [])
+        model_names = [m.get("id", "unknown") for m in models] if isinstance(models, list) else []
+        return True, ", ".join(model_names) if model_names else "no models listed"
+    except requests.RequestException as exc:
+        return False, str(exc)
+
+
 def _run_startup_preflight() -> None:
     """Capture startup diagnostics for retrieval docs and LLM readiness."""
-    # RAG files are already read during module import when _build_index() runs.
     _PREFLIGHT_STATUS["rag_docs"] = len(_RAG_DOCS)
     _PREFLIGHT_STATUS["rag_sources"] = len({doc["source"] for doc in _RAG_DOCS})
 
-    tokenizer, model, load_error = _load_local_llm()
-    _PREFLIGHT_STATUS["llm_ready"] = tokenizer is not None and model is not None
-    _PREFLIGHT_STATUS["llm_error"] = load_error
+    if _LLM_MODE == "external":
+        reachable, detail = _ping_external_llm()
+        _PREFLIGHT_STATUS["llm_ready"] = reachable
+        _PREFLIGHT_STATUS["llm_error"] = None if reachable else f"External LLM unreachable: {detail}"
+        if reachable:
+            logging.info("[ChatHandler] External LLM connected at %s (models: %s)", _EXTERNAL_LLM_BASE_URL, detail)
+        elif not _EXTERNAL_LLM_FAIL_SOFT:
+            raise RuntimeError(
+                f"External LLM unreachable at {_EXTERNAL_LLM_BASE_URL}: {detail}\n"
+                f"Ensure LM Studio (or compatible server) is running and accessible.\n"
+                f"Set 'fail_soft: true' in chatSettings.yaml to suppress this and fall back to extractive-only."
+            )
+        else:
+            logging.warning(
+                "[ChatHandler] External LLM unreachable (%s). Synthesis disabled; extractive fallback active.",
+                detail,
+            )
+    elif _LLM_MODE == "internal":
+        tokenizer, model, load_error = _load_local_llm()
+        _PREFLIGHT_STATUS["llm_ready"] = tokenizer is not None and model is not None
+        _PREFLIGHT_STATUS["llm_error"] = load_error
+    else:
+        _PREFLIGHT_STATUS["llm_ready"] = False
+        _PREFLIGHT_STATUS["llm_error"] = "LLM synthesis disabled (llm_mode=disabled)"
 
 
 _run_startup_preflight()
@@ -287,12 +423,15 @@ def _score_query(query_tokens: list[str], doc: dict, idf: dict[str, float]) -> f
     for tok in query_tokens:
         if tok in doc_tokens:
             score += (1.0 + math.log(1 + tf.get(tok, 0))) * idf.get(tok, 1.0)
+    stem_tokens = doc.get("stem_tokens", set())
+    if any(tok in stem_tokens for tok in query_tokens):
+        score *= 1.5
     return score
 
 
 def _retrieve(query: str, top_k: int = 2) -> list[dict]:
     """Return top-k retrieved chunks for a query from the local index."""
-    q_tokens = _tokenize(query)
+    q_tokens = _tokenize(_preprocess_query(query))
     if not q_tokens or not _RAG_DOCS:
         return []
 
@@ -340,29 +479,12 @@ def _build_synthesis_prompt(query: str, hits: list[dict]) -> str:
 
 
 def _clean_llm_answer(decoded_text: str, prompt: str) -> str:
-    """Remove prompt echo/noise from raw causal-model decoded output."""
+    """Strip prompt echo from causal-model output and return the rest."""
     text = (decoded_text or "").strip()
     if not text:
         return ""
-
-    # Most reliable case: model output starts with the prompt exactly.
     if text.startswith(prompt):
         text = text[len(prompt):].strip()
-
-    # Fallback: many causal models echo prompt-like blocks; keep only the tail after
-    # the last "Answer:" marker so we avoid duplicated Question/Context sections.
-    marker = "Answer:"
-    if marker in text:
-        text = text.rsplit(marker, 1)[1].strip()
-
-    # If the model still starts with prompt section labels, trim up to first sentence-ish line.
-    noisy_prefixes = ("Question:", "Context:", "Sources:")
-    while any(text.startswith(prefix) for prefix in noisy_prefixes):
-        split_idx = text.find("\n\n")
-        if split_idx == -1:
-            break
-        text = text[split_idx + 2 :].strip()
-
     return text
 
 
@@ -413,8 +535,17 @@ def _synthesize_with_local_llm(query: str, hits: list[dict]) -> str | None:
             mdl.to(model_device)
         mdl.eval()
 
+        # Use the tokenizer's chat template if available (Gemma requires it).
+        chat_prompt = prompt
+        if hasattr(tok, "apply_chat_template"):
+            try:
+                messages = [{"role": "user", "content": prompt}]
+                chat_prompt = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            except (TypeError, ValueError, AttributeError):
+                pass
+
         model_inputs = tokenizer_call(
-            prompt,
+            chat_prompt,
             return_tensors="pt",
             truncation=True,
             max_length=_LLM_MAX_INPUT_TOKENS,
@@ -437,8 +568,11 @@ def _synthesize_with_local_llm(query: str, hits: list[dict]) -> str | None:
                 do_sample=False,
                 pad_token_id=getattr(tok, "eos_token_id", None),
             )
-        decoded_text = str(tokenizer_decode(cast(Any, output_ids)[0], skip_special_tokens=True))
-        decoded_text = _clean_llm_answer(decoded_text, prompt)
+        raw_decoded = str(tokenizer_decode(cast(Any, output_ids)[0], skip_special_tokens=True))
+        print(f"[LLM] Raw output (first 200 chars): {raw_decoded[:200]}")
+        decoded_text = _clean_llm_answer(raw_decoded, chat_prompt)
+        if not decoded_text:
+            print(f"[LLM] Cleaning produced empty; returning raw fallback")
         return decoded_text if decoded_text else None
 
     try:
@@ -467,6 +601,73 @@ def _synthesize_with_local_llm(query: str, hits: list[dict]) -> str | None:
     return decoded + "\n\nSources:\n" + "\n".join(source_lines) + "\n\nType 'exit' to return to the main menu."
 
 
+_REASONING_PATTERNS = [
+    (r"Thinking Process:.*?(?=\n\n)", re.DOTALL),
+    (r"<think>.*?</think>", re.DOTALL),
+]
+
+
+def _strip_reasoning_artifacts(text: str) -> str:
+    """Remove internal reasoning blocks from reasoning-model output."""
+    cleaned = text
+    for pattern, flags in _REASONING_PATTERNS:
+        cleaned = re.sub(pattern, "", cleaned, flags=flags)
+    lines = [ln for ln in cleaned.splitlines() if ln.strip()]
+    if lines:
+        for i, line in enumerate(lines):
+            if not re.match(r"^\d+\.\s+\*\*", line) and not re.match(r"^\d+\.\s", line):
+                return "\n".join(lines[i:]).strip()
+    return cleaned.strip()
+
+
+def _synthesize_with_external_llm(query: str, hits: list[dict]) -> str | None:
+    """Generate a concise grounded answer via an OpenAI-compatible external API."""
+    prompt = _build_synthesis_prompt(query, hits)
+    try:
+        payload: dict[str, Any] = {
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": _EXTERNAL_LLM_MAX_TOKENS,
+        }
+        if _EXTERNAL_LLM_MODEL:
+            payload["model"] = _EXTERNAL_LLM_MODEL
+
+        resp = requests.post(
+            f"{_EXTERNAL_LLM_BASE_URL}/v1/chat/completions",
+            json=payload,
+            timeout=_EXTERNAL_LLM_TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        msg = data.get("choices", [{}])[0].get("message", {})
+        content = msg.get("content", "")
+        if not content or not content.strip():
+            content = msg.get("reasoning_content", "")
+        if content:
+            content = _strip_reasoning_artifacts(content)
+        if not content or not content.strip():
+            _set_last_llm_runtime_error("Empty response from external LLM")
+            return None
+
+        source_lines = [f"[{idx}] {hit['source']}" for idx, hit in enumerate(hits, start=1)]
+        _set_last_llm_runtime_error(None)
+        return content.strip() + "\n\nSources:\n" + "\n".join(source_lines) + "\n\nType 'exit' to return to the main menu."
+    except requests.RequestException as exc:
+        _set_last_llm_runtime_error(f"External LLM request failed: {exc}")
+        return None
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        _set_last_llm_runtime_error(f"External LLM response parse error: {exc}")
+        return None
+
+
+def _synthesize(query: str, hits: list[dict]) -> str | None:
+    """Dispatch synthesis to the configured LLM backend."""
+    if _LLM_MODE == "external":
+        return _synthesize_with_external_llm(query, hits)
+    if _LLM_MODE == "internal":
+        return _synthesize_with_local_llm(query, hits)
+    return None
+
+
 def _build_rag_response(query: str) -> str:
     """Return a final chat reply using retrieval plus optional synthesis."""
     hits = _retrieve(query, top_k=2)
@@ -477,15 +678,16 @@ def _build_rag_response(query: str) -> str:
             "Type 'exit' to return to the main menu."
         )
 
-    synthesized = _synthesize_with_local_llm(query, hits)
+    synthesized = _synthesize(query, hits)
     if synthesized:
         return synthesized
 
     fallback = _build_extractive_response(hits)
     if _LAST_LLM_RUNTIME_ERROR:
+        mode_label = "External" if _LLM_MODE == "external" else "Local"
         return (
             fallback
-            + "\n\n[Runtime note] Local LLM synthesis failed. "
+            + "\n\n[Runtime note] " + mode_label + " LLM synthesis failed. "
             + f"Reason: {_LAST_LLM_RUNTIME_ERROR}"
         )
     return fallback

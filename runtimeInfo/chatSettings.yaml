@@ -8,3 +8,13 @@ exit_intent_threshold: 0.6
 # Intent labels treated as exit intents by the NLP classifier.
 exit_intent_names:
   - exit
+
+# LLM synthesis mode: "external" (LM Studio), "internal" (in-process), or "disabled"
+llm_mode: "external"
+
+external_llm:
+  base_url: "http://localhost:1234"
+  model: ""  # empty = use LM Studio's currently loaded model
+  timeout: 60
+  max_tokens: 1024
+  fail_soft: false  # true = warn + extractive fallback; false = hard fail at startup
