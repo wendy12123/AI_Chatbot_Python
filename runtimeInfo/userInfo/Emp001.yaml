@@ -3,7 +3,7 @@ quiz_progress:
   Set1:
     completed: true
     name: Set 1
-    score: 3
+    score: 2
     total: 5
 role: student
 salt: 9kt5acnezeoll57t

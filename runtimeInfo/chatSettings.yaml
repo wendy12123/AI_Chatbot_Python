@@ -17,4 +17,4 @@ external_llm:
   model: ""  # empty = use LM Studio's currently loaded model
   timeout: 60
   max_tokens: 1024
-  fail_soft: false  # true = warn + extractive fallback; false = hard fail at startup
+  fail_soft: true  # true = warn + extractive fallback; false = hard fail at startup
