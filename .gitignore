@@ -1,2 +1,2 @@
-.env
-headlessLog/
+venv/
+.DS_Store
