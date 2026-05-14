@@ -814,7 +814,7 @@ def chat_handler(state, meta, inputText, _predictedIntent):
         # 準備一段歡迎文字，並詢問用戶想要哪種聊天模式
         response = (
             "You are now in chat mode.\n"
-            "Would you like a **General Chat** (ask me anything) or a **Course Chat** (questions strictly based on python lecture notes)?\n"
+            "Would you like a **General Chat** (ask me anything) or a **Course Chat** (questions strictly based on AI lecture notes)?\n"
             "(Type 'general' or 'course', or 'exit' to leave)"
         )
         # 返回這段文字，並將狀態推進到 "CHAT_MODE_CHOICE_STATE"（等待用戶選擇模式）
