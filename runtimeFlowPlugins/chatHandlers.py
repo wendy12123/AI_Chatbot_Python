@@ -32,6 +32,7 @@ _LLM_CHECKPOINT = "google/gemma-4-E4B"
 _LLM_DEVICE = "cpu" if not _torch.cuda.is_available() else "cuda"
 _LLM_MAX_INPUT_TOKENS = 1200
 _LLM_MAX_NEW_TOKENS = 180
+CHAT_MODE_CHOICE_STATE = "awaiting_chat_mode_choice"
 
 _DEFAULT_CHAT_SETTINGS = {
     "exit_intent_check_enabled": True,
@@ -62,6 +63,49 @@ _PREFLIGHT_STATUS = {
 
 _LAST_LLM_RUNTIME_ERROR: str | None = None
 
+# ✨ 新增 1：通用聊天的 Prompt
+def _build_general_prompt(query: str) -> str:
+    """Build a simple prompt for general LLM querying without context."""
+    return (
+        "You are an intelligent AI assistant. Please answer the user's question clearly and concisely.\n\n"
+        f"User: {query}\n\n"
+        "Assistant:"
+    )
+
+# ✨ 新增 2：通用聊天的處理函數
+def _build_general_response(query: str) -> str:
+    """直接調用外部 API 進行通用回答，不使用本地知識庫。"""
+    prompt = _build_general_prompt(query)
+    
+    # 這裡我們複用你已經寫好的、連接 free.v36.cm 的邏輯
+    free_api_key = os.getenv("FREE_CHAT_API_KEY")
+    if not free_api_key:
+        return "Sorry, the General Chat mode is currently unavailable (API key missing)."
+
+    headers = {
+        "Authorization": f"Bearer {free_api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    payload = {
+        "model": "gpt-4o-mini",
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": _EXTERNAL_LLM_MAX_TOKENS,
+    }
+
+    try:
+        resp = requests.post("https://free.v36.cm/v1/chat/completions", json=payload, headers=headers, timeout=_EXTERNAL_LLM_TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+        
+        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        if not content:
+             return "Sorry, I couldn't generate a response right now."
+             
+        return content.strip() + "\n\nType 'exit' to return to the main menu."
+
+    except requests.RequestException as exc:
+        return f"Network error during general chat: {exc}"
 
 def _model_is_quantized(model: Any) -> bool:
     """Detect whether the loaded model is already managed by a quantized device map."""
@@ -724,44 +768,109 @@ def _build_rag_response(query: str) -> str:
         )
     return fallback
 
-
+# 註冊這個函數為 "ChatHandler" 插件
 @runtimeFlowPlugins.register("ChatHandler")
 def chat_handler(state, meta, inputText, _predictedIntent):
-    """Run one step of chat-mode state handling and return next flow outcome."""
+    """
+    運行聊天模式的一步狀態處理，並返回下一個流程的結果。
+    
+    參數:
+    - state: 當前系統所處的狀態（例如 "passoff", "CHAT_MODE_CHOICE_STATE" 等）。
+    - meta: 包含用戶資訊和對話歷史的字典。
+    - inputText: 用戶剛剛輸入的文字。
+    - _predictedIntent: NLP 模型預測的意圖（在這個 handler 中我們主要依賴自定義的邏輯，所以加上下劃線表示暫不使用）。
+    """
+    
+    # 創建一個 meta 的副本，以防止意外修改原始數據
     next_meta = dict(meta)
 
-    if state == "passoff":
-        return _outcome(
-            "You are now in chat mode. Ask me anything about the available course notes and quiz content. "
-            "Type 'exit' any time to return to the main menu.",
-            "ChatHandler",
-            CHAT_ACTIVE_STATE,
-            next_meta,
-        )
-
+    # =========================================================================
+    # --- 1. 通用退出指令處理 (優先級最高) ---
+    # 在聊天模式的任何狀態下，用戶都有權利隨時退出。
+    # =========================================================================
+    
+    # 如果當前的狀態是 CHAT_HOLD_STATE（通常是在準備退出前的短暫停留狀態）
     if state == CHAT_HOLD_STATE:
+        # 發出信號：不產生任何回應文字 ("")，將控制權交給 "WelcomeHandler"，
+        # 並且將狀態設定為 "passoff"（這會觸發主選單的歡迎詞）。
         return _outcome(get_return_to_menu_message(), "WelcomeHandler", "passoff", next_meta)
 
+    # 檢查用戶的輸入是否為明確的退出指令（如 "exit", "quit" 等）
     if _is_exit_text(inputText):
-        return _outcome(
-            f"{get_return_to_menu_message()} (you typed 'exit')",
-            "ChatHandler",
-            CHAT_HOLD_STATE,
-            next_meta,
-        )
+        # 如果是，發出退出信號，將狀態切換到 CHAT_HOLD_STATE 準備離開
+        return _outcome(f"{get_return_to_menu_message()} (you typed 'exit')", "ChatHandler", CHAT_HOLD_STATE, next_meta)
 
+    # 如果在設定中啟用了「意圖識別退出」功能
     if _EXIT_INTENT_ENABLED:
+        # 使用 AI 模型來判斷用戶輸入的是否有退出的意圖，並返回信心分數
         is_exit_intent, confidence, _intent_name = _detect_exit_intent(inputText)
         if is_exit_intent:
-            return _outcome(
-                f"{get_return_to_menu_message()} (detected exit intent with confidence {confidence:.2f}).",
-                "ChatHandler",
-                CHAT_HOLD_STATE,
-                next_meta,
-            )
+            # 如果 AI 判斷用戶想退出（且信心足夠高），則發出退出信號
+            return _outcome(f"{get_return_to_menu_message()} (detected exit intent).", "ChatHandler", CHAT_HOLD_STATE, next_meta)
 
-    if state != CHAT_ACTIVE_STATE:
-        return _outcome("", "ChatHandler", "passoff", next_meta)
 
-    response = _build_rag_response(inputText)
-    return _outcome(response, "ChatHandler", CHAT_ACTIVE_STATE, next_meta)
+    # =========================================================================
+    # --- 2. 核心狀態處理 ---
+    # 根據系統當前所處的狀態，執行不同的業務邏輯。
+    # =========================================================================
+    
+    # 狀態: 剛從主選單進入 Chat 模式時的初始狀態
+    if state == "passoff":
+        # 準備一段歡迎文字，並詢問用戶想要哪種聊天模式
+        response = (
+            "You are now in chat mode.\n"
+            "Would you like a **General Chat** (ask me anything) or a **Course Chat** (questions strictly based on python lecture notes)?\n"
+            "(Type 'general' or 'course', or 'exit' to leave)"
+        )
+        # 返回這段文字，並將狀態推進到 "CHAT_MODE_CHOICE_STATE"（等待用戶選擇模式）
+        return _outcome(response, "ChatHandler", CHAT_MODE_CHOICE_STATE, next_meta)
+
+    # ✨ 狀態: 處理用戶對「聊天模式」的選擇
+    if state == CHAT_MODE_CHOICE_STATE:
+        # 清理用戶的輸入文字，轉為小寫以方便比對
+        choice = inputText.strip().lower()
+        
+        # 如果用戶輸入了包含 "general" 的字眼
+        if "general" in choice:
+            # 在 meta 中記錄用戶選擇了 "general" 模式
+            next_meta["chat_mode"] = "general"
+            # 告訴用戶模式已啟動，並將狀態推進到 "CHAT_ACTIVE_STATE"（開始實際聊天）
+            return _outcome("General Chat activated. Ask me anything!", "ChatHandler", CHAT_ACTIVE_STATE, next_meta)
+            
+        # 如果用戶輸入了包含 "course" 或 "deep" 的字眼
+        elif "course" in choice or "deep" in choice:
+            # 在 meta 中記錄用戶選擇了 "course" 模式
+            next_meta["chat_mode"] = "course"
+            # 告訴用戶模式已啟動，並將狀態推進到 "CHAT_ACTIVE_STATE"
+            return _outcome("Course Chat activated. Ask me about your Python notes!", "ChatHandler", CHAT_ACTIVE_STATE, next_meta)
+            
+        # 如果用戶輸入了無法識別的內容
+        else:
+            # 提示用戶重新輸入，並且「保持」在當前的 CHAT_MODE_CHOICE_STATE 狀態
+            return _outcome("Please type 'general' or 'course'.", "ChatHandler", CHAT_MODE_CHOICE_STATE, next_meta)
+
+    # ✨ 狀態: 用戶已經選擇了模式，正在進行實際的問答聊天
+    if state == CHAT_ACTIVE_STATE:
+        # 從 meta 中讀取用戶之前選擇的模式。如果找不到，預設為 "course" 模式。
+        current_mode = next_meta.get("chat_mode", "course") 
+        
+        if current_mode == "general":
+            # 如果是通用模式：調用 _build_general_response 函數，
+            # 該函數會直接連接外部 LLM API 回答問題，不使用本地筆記。
+            response = _build_general_response(inputText)
+        else:
+            # 如果是課程模式 (預設)：調用原有的 _build_rag_response 函數，
+            # 該函數會先檢索本地 Markdown 筆記，然後再交給 LLM 進行總結。
+            response = _build_rag_response(inputText)
+            
+        # 返回 LLM 生成的回應文字，並「保持」在 CHAT_ACTIVE_STATE 狀態，等待用戶的下一個問題
+        return _outcome(response, "ChatHandler", CHAT_ACTIVE_STATE, next_meta)
+
+    # =========================================================================
+    # --- 3. 備用邏輯 (Fallback) ---
+    # 如果系統進入了一個未知的狀態，執行這裡的代碼以防止崩潰。
+    # =========================================================================
+    
+    # 產生一個空的 response，並強制將狀態重置回 "passoff"（即重新詢問用戶要選擇哪種聊天模式）
+    return _outcome("", "ChatHandler", "passoff", next_meta)
+
