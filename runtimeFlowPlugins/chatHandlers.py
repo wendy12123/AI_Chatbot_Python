@@ -18,6 +18,8 @@ import yaml
 from runtimeSubmodules.chatbotNLP import predict_class
 from .welcomeHandlers import get_return_to_menu_message
 import torch as _torch
+import os
+import json
 
 
 BASEPATH = Path(__file__).resolve().parent.parent
@@ -35,12 +37,12 @@ _DEFAULT_CHAT_SETTINGS = {
     "exit_intent_check_enabled": True,
     "exit_intent_threshold": 0.6,
     "exit_intent_names": ["exit"],
-    "llm_mode": "internal",
+    "llm_mode": "external",
     "external_llm": {
         "base_url": "http://localhost:1234/v1",
         "model": "",
         "timeout": 60,
-        "fail_soft": False,
+        "fail_soft": True,
     },
 }
 
@@ -623,27 +625,56 @@ def _strip_reasoning_artifacts(text: str) -> str:
 def _synthesize_with_external_llm(query: str, hits: list[dict]) -> str | None:
     """Generate a concise grounded answer via an OpenAI-compatible external API."""
     prompt = _build_synthesis_prompt(query, hits)
+
+    # 1. 嘗試獲取 free.v36.cm 的 API Key
+    free_api_key = os.getenv("FREE_CHAT_API_KEY")
+    
+    # 2. 決定使用的 API 參數
+    if free_api_key:
+        # 如果有 Key，使用 free.v36.cm 的免費服務
+        api_base_url = "https://free.v36.cm/v1" 
+        api_key = free_api_key
+        # 使用它支援的免費模型
+        model_name = "gpt-4o-mini" 
+    else:
+        # 如果沒有 Key，退回到你原有的本地 LM Studio 設定
+        api_base_url = _EXTERNAL_LLM_BASE_URL
+        api_key = "not-needed" # 本地服務通常不需要 key
+        model_name = _EXTERNAL_LLM_MODEL
+
+    # 3. 準備請求標頭 (Header)
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+
+    # 4. 現在，將所有邏輯都放在一個 try/ except 區塊中
     try:
         payload: dict[str, Any] = {
+            "model": model_name, # 使用我們決定的模型名稱
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": _EXTERNAL_LLM_MAX_TOKENS,
         }
-        if _EXTERNAL_LLM_MODEL:
-            payload["model"] = _EXTERNAL_LLM_MODEL
 
+        # 發送請求
         resp = requests.post(
-            f"{_EXTERNAL_LLM_BASE_URL}/v1/chat/completions",
+            f"{api_base_url}/chat/completions",
             json=payload,
+            headers=headers, 
             timeout=_EXTERNAL_LLM_TIMEOUT,
         )
-        resp.raise_for_status()
+        resp.raise_for_status() # 如果 API 返回錯誤 (如 4xx, 5xx)，這裡會拋出異常
         data = resp.json()
+
         msg = data.get("choices", [{}])[0].get("message", {})
         content = msg.get("content", "")
+
         if not content or not content.strip():
             content = msg.get("reasoning_content", "")
+            
         if content:
             content = _strip_reasoning_artifacts(content)
+            
         if not content or not content.strip():
             _set_last_llm_runtime_error("Empty response from external LLM")
             return None
@@ -651,11 +682,12 @@ def _synthesize_with_external_llm(query: str, hits: list[dict]) -> str | None:
         source_lines = [f"[{idx}] {hit['source']}" for idx, hit in enumerate(hits, start=1)]
         _set_last_llm_runtime_error(None)
         return content.strip() + "\n\nSources:\n" + "\n".join(source_lines) + "\n\nType 'exit' to return to the main menu."
+    
     except requests.RequestException as exc:
-        _set_last_llm_runtime_error(f"External LLM request failed: {exc}")
+        _set_last_llm_runtime_error(f"External API request failed: {exc}")
         return None
     except (KeyError, IndexError, TypeError, ValueError) as exc:
-        _set_last_llm_runtime_error(f"External LLM response parse error: {exc}")
+        _set_last_llm_runtime_error(f"External API response parse error: {exc}")
         return None
 
 

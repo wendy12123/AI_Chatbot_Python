@@ -19,6 +19,9 @@ import datetime
 import time
 import sys
 from typing import Any
+import os
+from dotenv import load_dotenv
+load_dotenv()
 
 DEBUGGING = True
 
