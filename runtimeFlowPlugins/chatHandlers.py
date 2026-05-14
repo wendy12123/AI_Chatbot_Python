@@ -788,25 +788,20 @@ def chat_handler(state, meta, inputText, _predictedIntent):
     # --- 1. 通用退出指令處理 (優先級最高) ---
     # 在聊天模式的任何狀態下，用戶都有權利隨時退出。
     # =========================================================================
-    
-    # 如果當前的狀態是 CHAT_HOLD_STATE（通常是在準備退出前的短暫停留狀態）
-    if state == CHAT_HOLD_STATE:
-        # 發出信號：不產生任何回應文字 ("")，將控制權交給 "WelcomeHandler"，
-        # 並且將狀態設定為 "passoff"（這會觸發主選單的歡迎詞）。
-        return _outcome(get_return_to_menu_message(), "WelcomeHandler", "passoff", next_meta)
 
     # 檢查用戶的輸入是否為明確的退出指令（如 "exit", "quit" 等）
     if _is_exit_text(inputText):
-        # 如果是，發出退出信號，將狀態切換到 CHAT_HOLD_STATE 準備離開
-        return _outcome(f"{get_return_to_menu_message()} (you typed 'exit')", "ChatHandler", CHAT_HOLD_STATE, next_meta)
+        # 如果是，直接返回主選單，將狀態切換到 WelcomeHandler 的 passoff
+        return _outcome(f"{get_return_to_menu_message()}", "WelcomeHandler", "passoff", next_meta)
 
     # 如果在設定中啟用了「意圖識別退出」功能
     if _EXIT_INTENT_ENABLED:
-        # 使用 AI 模型來判斷用戶輸入的是否有退出的意圖，並返回信心分數
+        # 使用 AI 模型來判斷用戶輸入的是否有退出的意圖
         is_exit_intent, confidence, _intent_name = _detect_exit_intent(inputText)
         if is_exit_intent:
-            # 如果 AI 判斷用戶想退出（且信心足夠高），則發出退出信號
-            return _outcome(f"{get_return_to_menu_message()} (detected exit intent).", "ChatHandler", CHAT_HOLD_STATE, next_meta)
+            # 如果 AI 判斷用戶想退出，則發出退出信號返回主選單
+            return _outcome(f"{get_return_to_menu_message()} (detected exit intent).", "WelcomeHandler", "passoff", next_meta)
+
 
 
     # =========================================================================
